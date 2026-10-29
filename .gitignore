@@ -1,0 +1,13 @@
+# Senha do Wi-Fi: fica só na placa e no computador de quem usa
+esp32/config_wifi.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Banco de dados local e variáveis de ambiente
+*.db
+*.sqlite3
+.env
