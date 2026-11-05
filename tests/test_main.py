@@ -114,7 +114,7 @@ def rodar_main(roteiro, wifi=True, status_post=200, erro_post=None, pir=0):
             original = PinFalso.value
 
             def value_com_pir(self, novo=None):
-                if novo is None and self.numero == 27:
+                if novo is None and self.numero == 33:
                     return pir
                 return original(self, novo)
 
@@ -129,7 +129,7 @@ def rodar_main(roteiro, wifi=True, status_post=200, erro_post=None, pir=0):
 
 class TestMain(unittest.TestCase):
     def test_cada_categoria_acende_a_luz_certa(self):
-        casos = [("11111111", "vip", 25), ("22222222", "estagio", 26), ("33333333", "visita", 33)]
+        casos = [("11111111", "vip", 26), ("22222222", "estagio", 25), ("33333333", "visita", 27)]
         for uid, categoria, pino in casos:
             with self.subTest(categoria=categoria):
                 modulo, texto, _ = rodar_main([uid])

@@ -15,13 +15,13 @@ from estruturas import RingBuffer, TabelaCartoes
 
 # Pinos do ESP32 (os mesmos do README)
 PINO_SCK, PINO_MOSI, PINO_MISO, PINO_RST, PINO_SDA = 18, 23, 19, 22, 5
-PINO_PIR = 27
+PINO_PIR = 33
 
 # Cada categoria tem uma luz: amarelo = VIP, verde = estágio, vermelho = visita
 LEDS = {
-    "vip": Pin(25, Pin.OUT),      # amarelo
-    "estagio": Pin(26, Pin.OUT),  # verde
-    "visita": Pin(33, Pin.OUT),   # vermelho
+    "vip": Pin(26, Pin.OUT),      # amarelo
+    "estagio": Pin(25, Pin.OUT),  # verde
+    "visita": Pin(27, Pin.OUT),   # vermelho
 }
 
 # Servidor de teste da Entrega 2. Na Entrega 3 troca pela nossa API.

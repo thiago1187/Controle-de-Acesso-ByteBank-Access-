@@ -53,10 +53,10 @@ O RC522 liga só no 3V3. Se o módulo semáforo não tiver resistor, use um de 2
 | RFID RC522 | MOSI | GPIO 23 |
 | RFID RC522 | MISO | GPIO 19 |
 | RFID RC522 | RST | GPIO 22 |
-| Sensor PIR | OUT | GPIO 27 |
-| LED amarelo (VIP) | Ânodo | GPIO 25 |
-| LED verde (Estágio) | Ânodo | GPIO 26 |
-| LED vermelho (Visita) | Ânodo | GPIO 33 |
+| Sensor PIR | OUT | GPIO 33 |
+| LED amarelo (VIP) | Ânodo | GPIO 26 |
+| LED verde (Estágio) | Ânodo | GPIO 25 |
+| LED vermelho (Visita) | Ânodo | GPIO 27 |
 
 ## Estrutura do repositório
 
