@@ -132,8 +132,13 @@ Esses testes conferem a lógica do código. Eles não substituem o teste na plac
 
 Antes da bancada, o circuito e o código foram rodados no simulador Wokwi (ESP32 com MicroPython, Wi-Fi `Wokwi-GUEST`). O cartão foi lido, a categoria identificada e o servidor respondeu 200. No simulador os UIDs são os dos cartões de teste do Wokwi (`01020304`, `11223344` e `55667788`). Na bancada, troque pelos UIDs dos nossos cartões.
 
-<!-- Foto ou GIF do circuito na bancada: colocar em docs/circuito-bancada.jpg e descomentar a linha abaixo -->
-<!-- ![Circuito montado na bancada](docs/circuito-bancada.jpg) -->
+## Circuito na bancada
+
+![Circuito montado na bancada](docs/circuito-bancada.jpg)
+
+Foto de 05/11, durante a montagem: ESP32, leitor RC522, módulo semáforo (amarelo, verde e vermelho) e a tag azul.
+
+Situação nesse momento: a placa roda o `main.py` e mostra "Aproxime um cartão" no terminal. O leitor ainda não respondeu na bancada (a leitura do registrador de versão do chip volta 0x0). Estamos conferindo a ligação dos fios. O fluxo completo (cartão, categoria, luz e envio do JSON) já foi validado no simulador.
 
 ## Créditos
 
