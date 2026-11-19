@@ -154,7 +154,7 @@ class TestMain(unittest.TestCase):
     def test_json_enviado_tem_os_campos_combinados(self):
         _, _, chamadas = rodar_main(["11111111"])
         url, json = chamadas[0]
-        self.assertEqual(url, "http://httpbin.org/post")
+        self.assertTrue(url.endswith("/acessos"))
         self.assertEqual(set(json), {"uid", "nome", "categoria", "resultado", "presenca", "uptime_ms"})
         self.assertEqual(json["categoria"], "vip")
         self.assertEqual(json["resultado"], "liberado")

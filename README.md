@@ -68,15 +68,20 @@ esp32/
   mfrc522.py               biblioteca do leitor RC522 (ver Créditos)
   LICENSE_mfrc522.txt      licença da biblioteca
   config_wifi.example.py   modelo para o arquivo com a senha do Wi-Fi
+api/
+  app.py                   API em Flask: recebe o JSON do ESP32 e grava no banco
+  schema.sql               tabelas do banco (usuarios, audit_access_logs, saldos, transacoes)
+  requirements.txt         dependência da API (Flask)
 docs/
   arquitetura.png          diagrama de arquitetura
 tests/
   test_boot.py             testes do boot.py rodando no computador
   test_estruturas.py       testes da Tabela Hash e do Ring Buffer
   test_main.py             testes do fluxo do main.py
+  test_api.py              testes da API com banco temporário
 ```
 
-A API, o `schema.sql` e o dashboard entram nas próximas entregas.
+O dashboard entra na próxima entrega.
 
 ## Entrega 2: como o main.py funciona
 
@@ -85,7 +90,7 @@ A API, o `schema.sql` e o dashboard entram nas próximas entregas.
 3. Com o cartão lido, procura o UID na Tabela Hash (`cartoes`). A busca é O(1).
 4. Se achou, acende a luz da categoria por 3 segundos. Se não achou, as 3 luzes piscam.
 5. Guarda o acesso no Ring Buffer (os 20 últimos ficam na memória da placa).
-6. Envia um JSON com `urequests.post()` para `http://httpbin.org/post`, um servidor de teste que devolve o que recebe. Quando dá certo, o terminal mostra `Servidor respondeu: 200`.
+6. Envia um JSON com `urequests.post()` para a nossa API (`URL_API` no `main.py`). Quando dá certo, o terminal mostra `Servidor respondeu: 201`. Na Entrega 2 o envio foi testado com `http://httpbin.org/post`, um servidor de teste que só devolve o que recebe.
 
 Exemplo do JSON enviado:
 
@@ -97,6 +102,45 @@ Exemplo do JSON enviado:
 Os nomes e UIDs que aparecem no código são de teste. Para cadastrar um cartão seu, rode o `main.py`, encoste o cartão e copie o UID que aparece em "Cartão não cadastrado". Depois coloque esse UID em uma linha `cartoes.cadastrar(...)` do `main.py`.
 
 O servidor de teste usa HTTP sem criptografia. Por isso só vão dados de teste, nada de dado real de pessoa.
+
+## Entrega 3: API e banco de dados
+
+Escolhemos Flask e SQLite porque são os mais simples de rodar: Flask é uma dependência só, e o SQLite é um arquivo (`api/bytebank.db`), sem servidor de banco.
+
+### Como rodar
+
+```
+cd api
+pip install -r requirements.txt
+python app.py
+```
+
+A API sobe em `http://0.0.0.0:5000`. Na primeira vez ela cria as tabelas do `schema.sql`, cadastra três cartões de exemplo e carrega a Tabela Hash. Para o ESP32 chegar nela, descubra o IP do computador (`ipconfig` no Windows, `ip a` no Linux) e coloque em `URL_API` no `main.py`, por exemplo `http://192.168.0.10:5000/acessos`. Placa e computador precisam estar na mesma rede Wi-Fi.
+
+### O que a API faz
+
+| Rota | O que faz |
+| --- | --- |
+| `POST /acessos` | Recebe o JSON do ESP32. Procura o `uid` na Tabela Hash (O(1)), decide `liberado` ou `negado` e grava em `audit_access_logs` com timestamp, usuário e resultado. Grava sempre, mesmo cartão desconhecido. |
+| `GET /acessos` | Últimos acessos gravados (o dashboard vai ler daqui). |
+| `GET /usuarios` | Cartões cadastrados. |
+| `POST /usuarios` | Cadastra um cartão novo no banco e na Tabela Hash. |
+| `POST /transacoes` | Depósito ou saque. Atualiza `saldos` e grava em `transacoes` na mesma transação SQL. |
+| `GET /saldos/<uid>` | Saldo de um usuário. |
+
+### Tabela Hash e atualização atômica
+
+A Tabela Hash da API é um `dict` do Python carregado da tabela `usuarios` quando o servidor sobe. A busca por `uid` é O(1), então a validação do cartão não depende de consulta ao banco.
+
+A atualização atômica aparece em `POST /transacoes`: o `UPDATE` do saldo e o `INSERT` da transação ficam dentro de um mesmo bloco `with`, que é uma transação SQL. Se o saque deixar o saldo negativo, o `CHECK (saldo >= 0)` do `schema.sql` falha e o banco desfaz tudo. O teste `test_saque_maior_que_saldo_nao_grava_nada` confere isso.
+
+Exemplo de teste com `curl`, com a API rodando:
+
+```
+curl -X POST http://localhost:5000/acessos -H "Content-Type: application/json" -d "{\"uid\": \"01020304\", \"presenca\": true}"
+```
+
+Resposta: `{"categoria": "vip", "log_id": 1, "nome": "Pessoa VIP", "resultado": "liberado", "uid": "01020304"}`.
 
 ## Como rodar na placa
 
@@ -120,7 +164,7 @@ Se não conectar depois de 3 tentativas, o `boot.py` avisa no terminal e deixa a
 
 ## Testes
 
-Os testes rodam no computador com Python 3 e usam módulos de mentira (`machine`, `network`, `urequests` e o leitor) para simular a placa. Cobrem o `boot.py` (conexão, senha errada, falha do rádio, senha nunca aparece na saída), a Tabela Hash, o Ring Buffer (inclusive quando enche e sobrescreve o mais antigo) e o fluxo do `main.py` (cartão liberado, não cadastrado, falha de rede e repetição do mesmo cartão).
+Os testes rodam no computador com Python 3. Os da placa usam módulos de mentira (`machine`, `network`, `urequests` e o leitor) para simular o ESP32. Os da API usam um banco SQLite temporário e cobrem acesso liberado, negado, cadastro de cartão, depósito, saque e saque sem saldo (nada é gravado). Cobrem o `boot.py` (conexão, senha errada, falha do rádio, senha nunca aparece na saída), a Tabela Hash, o Ring Buffer (inclusive quando enche e sobrescreve o mais antigo) e o fluxo do `main.py` (cartão liberado, não cadastrado, falha de rede e repetição do mesmo cartão).
 
 ```
 python -m unittest discover tests -v
@@ -148,12 +192,10 @@ A leitura do RC522 usa a biblioteca `micropython-mfrc522` de Stefan Wendler (lic
 
 - [ ] Entrega 1 (29/10): repositório, README, diagrama e `boot.py` prontos. Falta registrar o teste do `boot.py` na placa.
 - [ ] Entrega 2 (05/11): `main.py`, estruturas em memória e envio de JSON prontos e testados no simulador. Falta a foto do circuito na bancada.
-- [ ] Entrega 3 (12/11): API em Python, `schema.sql` e banco de dados
+- [x] Entrega 3 (12/11): API em Flask, `schema.sql` e banco SQLite, com testes
 - [ ] Entrega 4 (19/11): dashboard em Streamlit e teste de ponta a ponta
 - [ ] Entrega final (26/11): demonstração na bancada
 
 ## Ainda a definir pelo grupo
 
-- FastAPI ou Flask
-- SQLite ou PostgreSQL
 - Papel exato do sensor PIR no fluxo de acesso

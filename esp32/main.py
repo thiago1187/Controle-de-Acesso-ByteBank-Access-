@@ -25,7 +25,9 @@ LEDS = {
 }
 
 # Servidor de teste da Entrega 2. Na Entrega 3 troca pela nossa API.
-URL_API = "http://httpbin.org/post"
+# Endereço da nossa API (Entrega 3). Troque pelo IP do computador que roda o app.py.
+# Para testar sem a API, pode usar "http://httpbin.org/post", que só devolve o que recebe.
+URL_API = "http://192.168.0.10:5000/acessos"
 
 SEGUNDOS_LUZ = 3          # tempo que a luz fica acesa
 INTERVALO_MESMO_CARTAO_MS = 2000  # ignora o mesmo cartão lido de novo logo em seguida
