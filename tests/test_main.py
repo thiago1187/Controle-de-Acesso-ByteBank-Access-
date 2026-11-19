@@ -60,6 +60,10 @@ class LeitorFalso:
         uid = bytes.fromhex(self.atual)
         return self.OK, list(uid) + [0]
 
+    def read_uid(self):
+        status, _ = self.request(self.REQIDL)
+        return list(bytes.fromhex(self.atual)) if status == self.OK else None
+
 
 class RespostaFalsa:
     def __init__(self, status, dados=None):
@@ -174,6 +178,11 @@ class TestMain(unittest.TestCase):
         url, json = chamadas[0]
         self.assertTrue(url.endswith("/acessos"))
         self.assertEqual(json, {"uid": "11111111", "presenca": False})
+
+    def test_uids_longos_nao_sao_truncados_antes_da_api(self):
+        uids = ["04112233445566", "041122aabbccdd", "04112233445566778899"]
+        _, _, chamadas = rodar_main(uids)
+        self.assertEqual([dados["uid"] for _, dados in chamadas], uids)
 
     def test_presenca_do_pir_vai_no_json(self):
         _, texto, chamadas = rodar_main(["22222222"], pir=1)

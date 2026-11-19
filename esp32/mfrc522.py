@@ -5,9 +5,16 @@
 # 1. ramo 'esp32' no __init__ (a original só aceita WiPy e ESP8266);
 # 2. condição de espera do _tocard sem '~' (a original saía do laço cedo demais);
 # 3. leitura da FIFO e dos registradores em uma transação SPI só.
+# 4. espera de reset, detecção de chip ausente e timeout de CRC;
+# 5. UIDs completos com cascata CL1/CL2/CL3, BCC, SAK e CRC_A;
+# 6. encerra o comando anterior antes de limpar as interrupções.
+# 7. preserva a função SPI dos pinos ao recriar o leitor.
+# 8. limpa CRCIRq escrevendo 1 antes de iniciar um novo cálculo.
+# 9. configura RF explicitamente e aguarda o campo antes da primeira leitura.
 
 from machine import Pin, SPI
 from os import uname
+import time
 
 
 class MFRC522:
@@ -21,10 +28,12 @@ class MFRC522:
 	AUTHENT1A = 0x60
 	AUTHENT1B = 0x61
 
-	def __init__(self, sck, mosi, miso, rst, cs):
+	def __init__(self, sck, mosi, miso, rst, cs, baudrate=1000000):
 
-		self.sck = Pin(sck, Pin.OUT)
-		self.mosi = Pin(mosi, Pin.OUT)
+		# O SPI configura estes sinais. Pin.OUT desfaz o mux se o barramento
+		# já existe, e o ESP32 não o refaz ao receber configuração idêntica.
+		self.sck = Pin(sck)
+		self.mosi = Pin(mosi)
 		self.miso = Pin(miso)
 		self.rst = Pin(rst, Pin.OUT)
 		self.cs = Pin(cs, Pin.OUT)
@@ -36,16 +45,19 @@ class MFRC522:
 
 		if board == 'WiPy' or board == 'LoPy' or board == 'FiPy':
 			self.spi = SPI(0)
-			self.spi.init(SPI.MASTER, baudrate=1000000, pins=(self.sck, self.mosi, self.miso))
+			self.spi.init(SPI.MASTER, baudrate=baudrate, pins=(self.sck, self.mosi, self.miso))
 		elif board == 'esp8266':
 			self.spi = SPI(baudrate=100000, polarity=0, phase=0, sck=self.sck, mosi=self.mosi, miso=self.miso)
 			self.spi.init()
 		elif board == 'esp32':
-			self.spi = SPI(2, baudrate=1000000, polarity=0, phase=0, sck=self.sck, mosi=self.mosi, miso=self.miso)
+			self.spi = SPI(2, baudrate=baudrate, polarity=0, phase=0, sck=self.sck, mosi=self.mosi, miso=self.miso)
 		else:
 			raise RuntimeError("Unsupported platform")
 
 		self.rst.value(1)
+		time.sleep_ms(50)  # aguarda o oscilador depois do reset físico
+		if self._rreg(0x37) in (0x00, 0xFF):
+			raise OSError("RC522 sem resposta: confira SPI e alimentacao 3,3 V")
 		self.init()
 
 	def _wreg(self, reg, val):
@@ -84,10 +96,10 @@ class MFRC522:
 			irq_en = 0x77
 			wait_irq = 0x30
 
-		self._wreg(0x02, irq_en | 0x80)
-		self._cflags(0x04, 0x80)
-		self._sflags(0x0A, 0x80)
 		self._wreg(0x01, 0x00)
+		self._wreg(0x02, irq_en | 0x80)
+		self._wreg(0x04, 0x7F)
+		self._sflags(0x0A, 0x80)
 
 		for c in send:
 			self._wreg(0x09, c)
@@ -136,7 +148,8 @@ class MFRC522:
 
 	def _crc(self, data):
 
-		self._cflags(0x05, 0x04)
+		self._wreg(0x01, 0x00)
+		self._wreg(0x05, 0x04)  # CRCIRq é limpo escrevendo 1, não 0.
 		self._sflags(0x0A, 0x80)
 
 		for c in data:
@@ -144,33 +157,48 @@ class MFRC522:
 
 		self._wreg(0x01, 0x03)
 
-		i = 0xFF
+		inicio = time.ticks_ms()
 		while True:
 			n = self._rreg(0x05)
-			i -= 1
-			if not ((i != 0) and not (n & 0x04)):
+			if n & 0x04:
 				break
+			if time.ticks_diff(time.ticks_ms(), inicio) >= 100:
+				raise OSError("RC522: timeout no calculo do CRC")
+			time.sleep_ms(1)
 
 		return [self._rreg(0x22), self._rreg(0x21)]
 
 	def init(self):
 
 		self.reset()
-		self._wreg(0x2A, 0x8D)
-		self._wreg(0x2B, 0x3E)
-		self._wreg(0x2D, 30)
-		self._wreg(0x2C, 0)
+		self._wreg(0x12, 0x00)  # TxMode: 106 kbit/s, CRC automático desligado
+		self._wreg(0x13, 0x00)  # RxMode: 106 kbit/s, CRC automático desligado
+		self._wreg(0x24, 0x26)  # largura da modulação padrão
+		# Timer automático: 13,56 MHz / (2 * 169 + 1) = 40 kHz;
+		# recarga 1000 resulta em timeout de 25 ms após a transmissão.
+		self._wreg(0x2A, 0x80)
+		self._wreg(0x2B, 0xA9)
+		self._wreg(0x2C, 0x03)
+		self._wreg(0x2D, 0xE8)
 		self._wreg(0x15, 0x40)
 		self._wreg(0x11, 0x3D)
 		self.antenna_on()
+		time.sleep_ms(50)  # aguarda o campo antes de enviar REQA/WUPA
 
 	def reset(self):
 		self._wreg(0x01, 0x0F)
+		inicio = time.ticks_ms()
+		time.sleep_ms(50)
+		while self._rreg(0x01) & 0x10:
+			if time.ticks_diff(time.ticks_ms(), inicio) >= 150:
+				raise OSError("RC522: timeout ao sair do reset")
+			time.sleep_ms(5)
 
 	def antenna_on(self, on=True):
 
-		if on and ~(self._rreg(0x14) & 0x03):
-			self._sflags(0x14, 0x03)
+		if on:
+			if self._rreg(0x14) & 0x03 != 0x03:
+				self._sflags(0x14, 0x03)
 		else:
 			self._cflags(0x14, 0x03)
 
@@ -202,6 +230,43 @@ class MFRC522:
 				stat = self.ERR
 
 		return stat, recv
+
+	def read_uid(self):
+		"""Lê o UID inteiro (4, 7 ou 10 bytes) de uma única tag, ou None.
+
+		Implementa os níveis CL1/CL2/CL3 da NXP AN10927, verificando BCC,
+		SAK e CRC_A antes de devolver a identificação. Colisões são rejeitadas.
+		"""
+		status, _ = self.request(self.REQALL)
+		if status != self.OK:
+			return None
+		uid = []
+		for nivel in (0x93, 0x95, 0x97):
+			self._cflags(0x0E, 0x80)
+			self._wreg(0x0D, 0x00)
+			status, bloco, bits = self._tocard(0x0C, [nivel, 0x20])
+			if status != self.OK or bits != 40 or len(bloco) != 5:
+				return None
+			if bloco[0] ^ bloco[1] ^ bloco[2] ^ bloco[3] != bloco[4]:
+				return None
+			cascata = bloco[0] == 0x88
+			if cascata and nivel == 0x97:
+				return None
+			selecao = [nivel, 0x70] + bloco
+			selecao += self._crc(selecao)
+			status, sak, bits = self._tocard(0x0C, selecao)
+			if status != self.OK or bits != 24 or len(sak) != 3:
+				return None
+			if sak[1:] != self._crc(sak[:1]) or bool(sak[0] & 0x04) != cascata:
+				return None
+			uid.extend(bloco[1:4] if cascata else bloco[:4])
+			if not cascata:
+				# Encerra a seleção; a próxima WUPA pode reconhecer a mesma tag.
+				halt = [0x50, 0x00]
+				halt += self._crc(halt)
+				self._tocard(0x0C, halt)
+				return uid
+		return None
 
 	def select_tag(self, ser):
 

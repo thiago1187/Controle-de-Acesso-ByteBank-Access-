@@ -95,6 +95,8 @@ def raiz():
 def registrar_acesso():
     """Recebe o JSON do ESP32, valida e grava o log de auditoria."""
     dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "Envie um objeto JSON"}), 400
     if not dados or not isinstance(dados.get("uid"), str) or not dados["uid"]:
         return jsonify({"erro": "JSON precisa ter o campo 'uid' (texto)"}), 400
 
@@ -145,9 +147,12 @@ def listar_usuarios():
 @app.post("/usuarios")
 def cadastrar_usuario():
     """Cadastra um cartão novo no banco e na Tabela Hash."""
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "Envie um objeto JSON"}), 400
     uid, nome, categoria = dados.get("uid"), dados.get("nome"), dados.get("categoria")
-    if not uid or not nome or categoria not in ("vip", "estagio", "visita"):
+    if (not isinstance(uid, str) or not uid or not isinstance(nome, str) or not nome
+            or categoria not in ("vip", "estagio", "visita")):
         return jsonify({"erro": "Informe uid, nome e categoria (vip, estagio ou visita)"}), 400
     uid = uid.lower()
     if uid in cartoes:
@@ -166,7 +171,9 @@ def cadastrar_usuario():
 @app.post("/transacoes")
 def registrar_transacao():
     """Depósito ou saque. Atualiza o saldo e grava a transação de forma atômica."""
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "Envie um objeto JSON"}), 400
     uid = str(dados.get("uid", "")).lower()
     tipo = dados.get("tipo")
     valor = dados.get("valor")
@@ -202,7 +209,9 @@ def registrar_transacao():
 @app.post("/comandos")
 def enviar_comando():
     """O dashboard chama aqui. O comando fica na fila até o ESP32 buscar."""
-    dados = request.get_json(silent=True) or {}
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "Envie um objeto JSON"}), 400
     comando = dados.get("comando")
     if comando not in COMANDOS_VALIDOS:
         return jsonify({"erro": "Comando precisa ser um destes: " + ", ".join(COMANDOS_VALIDOS)}), 400

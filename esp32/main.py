@@ -63,13 +63,8 @@ def acender(categoria):
 
 def ler_uid(leitor):
     """Devolve o UID do cartão em texto hexadecimal, ou None se não tem cartão."""
-    status, _ = leitor.request(leitor.REQIDL)
-    if status != leitor.OK:
-        return None
-    status, bruto = leitor.anticoll()
-    if status != leitor.OK:
-        return None
-    return "%02x%02x%02x%02x" % (bruto[0], bruto[1], bruto[2], bruto[3])
+    uid = leitor.read_uid()
+    return bytes(uid).hex() if uid is not None else None
 
 
 def tem_wifi():

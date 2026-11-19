@@ -60,6 +60,25 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(self.cliente.post("/acessos", json={"nome": "x"}).status_code, 400)
         self.assertEqual(self.cliente.post("/acessos", data="nao e json").status_code, 400)
 
+    def test_json_com_tipo_errado_retorna_400_sem_gravar(self):
+        api.comandos_pendentes.clear()
+        for rota in ("/acessos", "/usuarios", "/comandos", "/transacoes"):
+            for dados in ([1], "texto", 123, True):
+                with self.subTest(rota=rota, dados=dados):
+                    r = self.cliente.post(rota, json=dados)
+                    self.assertEqual(r.status_code, 400)
+                    self.assertIn("erro", r.get_json())
+        self.assertEqual(self.cliente.get("/acessos").get_json(), [])
+        self.assertEqual(len(api.cartoes), 3)
+        self.assertEqual(api.comandos_pendentes, [])
+
+    def test_cadastro_com_uid_ou_nome_nao_textual_retorna_400(self):
+        for uid, nome in ((123, "Teste"), ([1], "Teste"), ("aabbccdd", {"nome": "Teste"})):
+            with self.subTest(uid=uid, nome=nome):
+                r = self.cliente.post("/usuarios", json={"uid": uid, "nome": nome, "categoria": "vip"})
+                self.assertEqual(r.status_code, 400)
+        self.assertEqual(len(api.cartoes), 3)
+
     def test_cadastrar_cartao_entra_na_hash(self):
         r = self.cliente.post("/usuarios", json={"uid": "AABBCCDD", "nome": "Novo", "categoria": "estagio"})
         self.assertEqual(r.status_code, 201)

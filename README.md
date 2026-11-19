@@ -124,6 +124,30 @@ streamlit run painel.py
 
 Abre no navegador em `http://localhost:8501`.
 
+**Monitor de bancada pela USB**
+
+Para acompanhar o leitor real sem configurar Wi-Fi, execute na raiz do projeto:
+
+```sh
+.venv/bin/python dashboard/monitor_nfc.py
+```
+
+Abra `http://127.0.0.1:8502`. O monitor mostra a conexão, as tentativas de leitura,
+as tags detectadas e as mensagens reais do ESP32, atualizadas a cada segundo.
+O leitor aceita UIDs de 4, 7 e 10 bytes. Uma chave mantida sobre a antena é
+contada uma vez; afaste por cerca de dois segundos para registrar nova aproximação.
+Se a placa reiniciar ou parar de enviar status, o monitor reabre a comunicação
+automaticamente. Uma conexão USB ativa não significa que uma tag foi reconhecida:
+confira o contador de detecções e o UID exibido.
+O ESP32 precisa ter MicroPython e `mfrc522.py`. O script de monitoramento roda
+na memória da placa; não substitui o `main.py`. Feche outros programas que
+estejam usando a mesma porta USB antes de iniciar.
+
+A placa desta bancada é selecionada pelo número de série `56AB001645`.
+Para outra placa, informe `BYTEBANK_ESP32_PORT` com a porta serial ou
+`BYTEBANK_ESP32_SERIAL` com seu número de série. As dependências do monitor
+estão em `dashboard/requirements.txt`.
+
 **3. Placa**
 
 1. Descubra o IP do computador (`ipconfig` no Windows) e coloque em `URL_API` no `esp32/main.py`, por exemplo `http://192.168.0.10:5000`.
@@ -192,6 +216,8 @@ python -m unittest discover tests -v
 | `test_boot.py` | Conexão Wi-Fi, senha errada, senha nunca aparece na saída |
 | `test_estruturas.py` | Tabela Hash e Ring Buffer (cheio, sobrescreve o mais antigo, limpar) |
 | `test_main.py` | Fluxo da placa com hardware simulado: luz certa por categoria, negado pisca, sem Wi-Fi usa a hash local, comandos |
+| `test_mfrc522.py` | Inicialização SPI e reset, CRC, seleção de tags e UIDs completos de 4, 7 e 10 bytes |
+| `test_monitor_nfc.py` | Telemetria USB, perda de atualizações e recuperação sem processos concorrentes na mesma serial |
 | `test_api.py` | Rotas da API, saque sem saldo não grava nada, comando chega uma vez só |
 | `test_ponta_a_ponta.py` | Fluxo completo: sobe a API, faz o papel do ESP32, abre o dashboard, clica em "Liberar trava" e confere que o comando chega na placa. Também manda 30 acessos seguidos sem travar |
 

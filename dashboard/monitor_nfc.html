@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ByteBank · Monitor NFC ao vivo</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0a1112; --panel:#111c1e; --line:#263638; --muted:#9caeb0; --text:#edf5f2; --green:#93efb7; --yellow:#f2d58e; --red:#ffaba0; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1220px; margin:auto; padding:32px 32px 24px; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid var(--line); padding-bottom:22px; }
+    .brand { font-size:20px; font-weight:750; letter-spacing:-.6px; display:flex; align-items:center; gap:10px; }
+    .brandmark { display:grid; place-items:center; width:32px; height:32px; background:var(--green); color:#10291a; border-radius:9px; font-size:19px; letter-spacing:-4px; padding-right:4px; }
+    .brand small { margin-left:12px; padding-left:20px; border-left:1px solid var(--line); color:var(--muted); font-size:14px; font-weight:400; letter-spacing:0; }
+    .live { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; white-space:nowrap; }
+    .dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+    .live[data-state="ready"] { color:var(--green); }
+    .live[data-state="stale"] { color:var(--yellow); }
+    .intro { display:flex; justify-content:space-between; align-items:end; gap:24px; margin:32px 0 24px; }
+    h1 { font-size:clamp(30px,4vw,42px); line-height:1.15; letter-spacing:-1.6px; margin:0 0 8px; font-weight:650; }
+    .intro p { margin:0; color:var(--muted); }
+    .connection-label { color:var(--muted); text-align:right; font-size:14px; }
+    .connection-label strong { display:block; color:var(--text); font-weight:500; }
+    .workspace { display:grid; grid-template-columns:minmax(0,1.32fr) minmax(300px,1fr); gap:18px; }
+    .reader-panel { position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; min-height:480px; border:1px solid var(--line); border-radius:20px; background:radial-gradient(ellipse at 50% 45%,#16322c 0%,#10201f 36%,#101b1d 75%); padding:24px; }
+    .panel-top { display:flex; justify-content:space-between; align-items:center; gap:16px; width:100%; }
+    .overline { color:var(--muted); text-transform:uppercase; letter-spacing:1.8px; font-size:11px; font-weight:650; }
+    .chip-badge { border:1px solid #36524b; color:#b0cbbd; padding:3px 9px; border-radius:6px; font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .illustration { width:min(100%,350px); flex:1; display:grid; place-items:center; min-height:245px; position:relative; }
+    .reader-svg { display:block; width:min(100%,270px); height:auto; overflow:visible; }
+    .field { fill:none; stroke:var(--green); stroke-width:1; opacity:0; transform-origin:150px 151px; }
+    .reader-panel[data-state="reading"] .field { animation:scan 4s ease-out infinite; }
+    .reader-panel[data-state="reading"] .field:nth-child(2) { animation-delay:2s; }
+    .reader-panel[data-state="detected"] .field { opacity:.32; stroke-width:2; }
+    .reader-panel[data-state="detected"] { border-color:#6abe8b; background:radial-gradient(ellipse at 50% 40%,#254e36 0%,#10251d 50%,#101b1d 100%); }
+    @keyframes scan { 0% { opacity:0; transform:scale(.88); } 25% { opacity:.18; } 100% { opacity:0; transform:scale(1.18); } }
+    .reader-state { text-align:center; z-index:1; max-width:420px; }
+    .state-icon { display:inline-block; font-size:12px; color:var(--muted); border:1px solid #40504d; border-radius:50px; padding:4px 12px; margin-bottom:12px; }
+    .reader-panel[data-state="reading"] .state-icon { color:#bad2c4; }
+    .reader-panel[data-state="detected"] .state-icon { color:var(--green); border-color:#65a77a; }
+    h2 { font-size:24px; line-height:1.25; letter-spacing:-.6px; font-weight:600; margin:0 0 8px; }
+    .reader-state p { margin:0; color:var(--muted); font-size:14px; max-width:380px; }
+    .caption { margin:23px 0 0; font-size:12px; color:#8fa59d; }
+    .details { display:flex; flex-direction:column; gap:16px; min-width:0; }
+    .status-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .status-box, .uid-card, .counts, .log-panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; }
+    .status-box { padding:17px 18px; min-width:0; }
+    .status-box .label { color:var(--muted); font-size:13px; margin-bottom:7px; }
+    .status-value { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; }
+    .status-value[data-state="ok"] { color:var(--green); }
+    .status-value[data-state="stale"] { color:var(--yellow); }
+    .status-value[data-state="error"] { color:var(--red); }
+    .uid-card { padding:24px; flex:1; min-height:178px; }
+    .uid-label { color:var(--muted); font-size:14px; }
+    #last-uid { display:block; margin:17px 0 13px; font:500 clamp(25px,3vw,34px)/1.2 ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:1px; overflow-wrap:anywhere; color:var(--green); }
+    #last-uid[data-empty="true"] { color:#6d8380; letter-spacing:2px; }
+    #last-tag-time { color:var(--muted); font-size:13px; margin:0; }
+    .counts { display:grid; grid-template-columns:1fr 1fr; padding:20px 24px; }
+    .count + .count { border-left:1px solid var(--line); padding-left:24px; }
+    .count-label { color:var(--muted); font-size:13px; }
+    .count-value { display:block; font-variant-numeric:tabular-nums; font-size:32px; line-height:1.4; font-weight:500; letter-spacing:-1px; }
+    .heartbeat { padding:0 4px; display:flex; justify-content:space-between; align-items:start; gap:12px; font-size:12px; color:var(--muted); }
+    .heartbeat time { text-align:right; font-variant-numeric:tabular-nums; }
+    .error-message { margin:0 0 16px; padding:12px 16px; background:#322321; border:1px solid #65423c; border-radius:10px; color:#f4c7be; font-size:14px; overflow-wrap:anywhere; }
+    .log-panel { margin-top:18px; overflow:hidden; }
+    .log-heading { display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line); gap:15px; }
+    .log-heading h2 { margin:0; font-size:15px; letter-spacing:0; }
+    .log-heading span { color:var(--muted); font-size:12px; }
+    .events { margin:0; padding:8px 22px; list-style:none; max-height:190px; overflow:auto; scrollbar-color:#35534a transparent; }
+    .events li { display:grid; grid-template-columns:78px minmax(0,1fr); gap:16px; padding:8px 0; font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .events time { color:#8a9f9b; }
+    .events .event-text { color:#c8d7d1; overflow-wrap:anywhere; }
+    .events [data-kind="tag"] .event-text { color:var(--green); }
+    .events [data-kind="error"] .event-text { color:var(--red); }
+    .log-empty { color:var(--muted); margin:0; padding:20px 22px; font-size:14px; }
+    footer { display:flex; justify-content:space-between; gap:20px; color:#819592; padding-top:18px; font-size:12px; }
+    footer span:last-child { text-align:right; overflow-wrap:anywhere; }
+    [hidden] { display:none !important; }
+    @media (max-width:820px) { main { padding:22px 20px; } .workspace { grid-template-columns:1fr; } .reader-panel { min-height:420px; } .details { display:grid; grid-template-columns:1fr 1fr; } .status-row,.heartbeat { grid-column:1/-1; } .uid-card { min-height:165px; } .counts { align-items:center; } .counts { padding:20px; } .count + .count { padding-left:18px; } }
+    @media (max-width:520px) { .brand small { display:none; } .intro { display:block; margin-top:25px; } .connection-label { text-align:left; margin-top:14px; } .connection-label strong { display:inline; margin-left:5px; } main { padding:20px 14px; } .reader-panel { padding:20px; min-height:410px; } .details { display:flex; } .status-box { padding:16px; } .uid-card { padding:22px; } .counts { padding:18px 22px; } .log-heading { padding:16px; } .log-heading span { display:none; } .events { padding:8px 16px; } .events li { grid-template-columns:66px minmax(0,1fr); gap:10px; font-size:12px; } footer { flex-direction:column; gap:4px; } footer span:last-child { text-align:left; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; } .reader-panel[data-state="reading"] .field { opacity:.1; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <div class="brand"><span class="brandmark" aria-hidden="true">⌁</span>ByteBank <small>Bancada de acesso</small></div>
+      <div class="live" id="live-badge" data-state="connecting"><span class="dot" aria-hidden="true"></span><span id="live-text">Conectando</span></div>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <div><h1 id="page-title">Monitor NFC</h1><p>Acompanhe a leitura do seu chaveiro em tempo real.</p></div>
+      <div class="connection-label">ESP32 + RC522<strong>Leitura real pela USB</strong></div>
+    </section>
+
+    <p class="error-message" id="error-message" role="alert" hidden></p>
+
+    <div class="workspace">
+      <section class="reader-panel" id="reader-panel" data-state="connecting" aria-label="Estado da leitura">
+        <div class="panel-top"><span class="overline">Leitor na bancada</span><span class="chip-badge" id="chip-version">RC522</span></div>
+        <div class="illustration" aria-hidden="true">
+          <svg class="reader-svg" viewBox="0 0 300 270" fill="none">
+            <rect class="field" x="23" y="13" width="254" height="242" rx="44"/>
+            <rect class="field" x="23" y="13" width="254" height="242" rx="44"/>
+            <rect x="55" y="24" width="190" height="220" rx="16" fill="#133c36" stroke="#3f7263" stroke-width="1.5"/>
+            <circle cx="69" cy="38" r="4" fill="#0c2422" stroke="#456f60"/>
+            <circle cx="231" cy="38" r="4" fill="#0c2422" stroke="#456f60"/>
+            <circle cx="69" cy="230" r="4" fill="#0c2422" stroke="#456f60"/>
+            <circle cx="231" cy="230" r="4" fill="#0c2422" stroke="#456f60"/>
+            <g stroke="#80b999" stroke-width="1.5" opacity=".75">
+              <rect x="72" y="47" width="156" height="134" rx="20"/>
+              <rect x="78" y="53" width="144" height="122" rx="18"/>
+              <rect x="84" y="59" width="132" height="110" rx="16"/>
+              <rect x="90" y="65" width="120" height="98" rx="14"/>
+            </g>
+            <path d="M138 126c-6-6-6-16 0-22m24 22c6-6 6-16 0-22m-31 29c-10-10-10-26 0-36m38 36c10-10 10-26 0-36" stroke="#bee0c7" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="150" cy="115" r="3" fill="#bee0c7"/>
+            <text x="150" y="151" text-anchor="middle" fill="#a3cbb3" font-family="monospace" font-size="9" letter-spacing="2">13.56 MHz</text>
+            <path d="M105 182v17h20m70-17v17h-20M150 180v9" stroke="#608b72" stroke-width="1.5"/>
+            <rect x="130" y="188" width="40" height="30" rx="3" fill="#10221f" stroke="#658b74"/>
+            <g stroke="#9db496" stroke-width="2"><path d="M126 193h-6m6 6h-6m6 6h-6m6 6h-6m54-18h6m-6 6h6m-6 6h6m-6 6h6"/></g>
+            <text x="150" y="206" text-anchor="middle" fill="#a2b7a6" font-family="monospace" font-size="7">RC522</text>
+            <g fill="#b1a46f"><rect x="100" y="237" width="5" height="14" rx="1"/><rect x="113" y="237" width="5" height="14" rx="1"/><rect x="126" y="237" width="5" height="14" rx="1"/><rect x="139" y="237" width="5" height="14" rx="1"/><rect x="152" y="237" width="5" height="14" rx="1"/><rect x="165" y="237" width="5" height="14" rx="1"/><rect x="178" y="237" width="5" height="14" rx="1"/><rect x="191" y="237" width="5" height="14" rx="1"/></g>
+          </svg>
+        </div>
+        <div class="reader-state" aria-live="polite" aria-atomic="true">
+          <span class="state-icon" id="state-icon">Iniciando monitor</span>
+          <h2 id="reader-title">Conectando à placa</h2>
+          <p id="reader-description">Aguardando a comunicação do ESP32 pela USB.</p>
+        </div>
+        <p class="caption">A ilustração acompanha o estado informado pela placa.</p>
+      </section>
+
+      <aside class="details" aria-label="Informações da leitura">
+        <div class="status-row">
+          <div class="status-box"><div class="label">USB · ESP32</div><div class="status-value" id="usb-status"><span class="dot" aria-hidden="true"></span><span id="usb-text">Aguardando</span></div></div>
+          <div class="status-box"><div class="label">Leitor · RC522</div><div class="status-value" id="chip-status"><span class="dot" aria-hidden="true"></span><span id="chip-text">Aguardando</span></div></div>
+        </div>
+        <div class="uid-card">
+          <div class="uid-label">Último UID recebido</div>
+          <output id="last-uid" data-empty="true" aria-live="polite">— — — —</output>
+          <p id="last-tag-time">Nenhuma tag reconhecida nesta sessão.</p>
+        </div>
+        <div class="counts">
+          <div class="count"><span class="count-label">Tentativas de leitura</span><output class="count-value" id="attempts">0</output></div>
+          <div class="count"><span class="count-label">Detecções</span><output class="count-value" id="detections">0</output></div>
+        </div>
+        <div class="heartbeat"><span>Última comunicação da placa</span><time id="heartbeat-time">Aguardando</time></div>
+      </aside>
+    </div>
+
+    <section class="log-panel" aria-labelledby="log-title">
+      <div class="log-heading"><h2 id="log-title">Atividade da placa</h2><span>Mensagens reais · mais recentes primeiro</span></div>
+      <ol class="events" id="events" aria-label="Últimas mensagens da placa"></ol>
+      <p class="log-empty" id="log-empty">Aguardando a primeira mensagem.</p>
+    </section>
+    <footer><span>Dados locais · atualização a cada segundo</span><span id="port">USB aguardando identificação</span></footer>
+  </main>
+
+  <script>
+    const elements = Object.fromEntries(Array.from(document.querySelectorAll('[id]')).map(element => [element.id, element]));
+    const numberFormat = new Intl.NumberFormat('pt-BR');
+    const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'America/Recife' });
+    let current = null;
+    let fetchFailed = false;
+    let fetching = false;
+    let eventSignature = '';
+
+    function text(id, value) {
+      const next = String(value);
+      if (elements[id].textContent !== next) elements[id].textContent = next;
+    }
+    function time(value) { return typeof value === 'number' && Number.isFinite(value) ? timeFormat.format(new Date(value * 1000)) : 'Aguardando'; }
+    function status(id, label, state) {
+      text(id + '-text', label);
+      elements[id + '-status'].dataset.state = state;
+    }
+
+    function render() {
+      const data = current;
+      if (!data && !fetchFailed) return;
+      const now = Date.now() / 1000;
+      const connected = !fetchFailed && Boolean(data && data.connected);
+      const fresh = connected && typeof data.last_heartbeat_at === 'number' && now - data.last_heartbeat_at <= 4;
+      const ready = fresh && data.reader_ok && data.phase === 'reading';
+      const justDetected = ready && typeof data.last_tag_at === 'number' && now - data.last_tag_at < 5;
+      const initializing = !fetchFailed && data && data.phase === 'connecting';
+      const error = fetchFailed ? 'A conexão com o monitor foi interrompida. Tentando reconectar…' : (data.error || '');
+
+      status('usb', connected ? 'Conectada' : (initializing ? 'Conectando' : 'Desconectada'), connected ? 'ok' : '');
+      status('chip', ready ? 'Respondendo' : (connected && data.reader_ok && !fresh ? 'Sem atualização' : (data && data.phase === 'error' ? 'Verificar' : 'Aguardando')), ready ? 'ok' : (connected && !fresh ? 'stale' : (data && data.phase === 'error' ? 'error' : '')));
+      elements['live-badge'].dataset.state = ready ? 'ready' : (connected && !fresh ? 'stale' : 'connecting');
+      text('live-text', ready ? 'Ao vivo' : (connected && !fresh ? 'Sem atualização' : (initializing ? 'Conectando' : 'Sem comunicação')));
+
+      if (justDetected) {
+        elements['reader-panel'].dataset.state = 'detected';
+        text('state-icon', 'Resposta recebida');
+        text('reader-title', data.last_uid ? 'Tag reconhecida' : 'Tag detectada');
+        text('reader-description', data.last_uid ? 'O leitor recebeu o identificador da tag. O UID está ao lado.' : 'A tag respondeu, mas o UID longo ainda precisa de leitura completa.');
+      } else if (ready) {
+        elements['reader-panel'].dataset.state = 'reading';
+        text('state-icon', 'Leitura em andamento');
+        text('reader-title', 'Aguardando uma tag');
+        text('reader-description', 'Aproxime um único chaveiro do centro da antena e acompanhe a leitura aqui.');
+      } else if (connected && !fresh) {
+        elements['reader-panel'].dataset.state = 'stale';
+        text('state-icon', 'Sem atualização da placa');
+        text('reader-title', 'Aguardando comunicação');
+        text('reader-description', 'A USB está aberta, mas ainda não há uma atualização recente do leitor.');
+      } else if (initializing) {
+        elements['reader-panel'].dataset.state = 'connecting';
+        text('state-icon', 'Iniciando monitor');
+        text('reader-title', 'Conectando à placa');
+        text('reader-description', 'Aguardando a comunicação do ESP32 pela USB.');
+      } else {
+        elements['reader-panel'].dataset.state = 'disconnected';
+        text('state-icon', 'Leitura interrompida');
+        text('reader-title', connected ? 'Verifique o leitor' : 'Placa desconectada');
+        text('reader-description', connected ? 'O RC522 ainda não confirmou que está pronto para ler.' : 'Conecte o ESP32 pela USB. O monitor aguarda a conexão.');
+      }
+
+      text('error-message', error);
+      elements['error-message'].hidden = !error;
+      if (!data) return;
+      text('chip-version', data.version ? 'RC522 · ' + data.version : 'RC522');
+      text('attempts', numberFormat.format(Number(data.attempts) || 0));
+      text('detections', numberFormat.format(Number(data.detections) || 0));
+      text('last-uid', data.last_uid || '— — — —');
+      elements['last-uid'].dataset.empty = data.last_uid ? 'false' : 'true';
+      text('last-tag-time', data.last_uid ? 'Recebido às ' + time(data.last_tag_at) : (data.last_tag_at ? 'Tag detectada às ' + time(data.last_tag_at) + ' · UID longo pendente.' : 'Nenhuma tag reconhecida nesta sessão.'));
+      text('heartbeat-time', time(data.last_heartbeat_at));
+      text('port', data.port || 'USB aguardando identificação');
+      if (typeof data.last_heartbeat_at === 'number') elements['heartbeat-time'].dateTime = new Date(data.last_heartbeat_at * 1000).toISOString();
+
+      const events = Array.isArray(data.events) ? data.events.slice().sort((a,b) => b.time - a.time).slice(0,12) : [];
+      const signature = JSON.stringify(events);
+      if (signature !== eventSignature) {
+        eventSignature = signature;
+        const fragment = document.createDocumentFragment();
+        for (const event of events) {
+          const row = document.createElement('li');
+          row.dataset.kind = ['tag','error'].includes(event.kind) ? event.kind : 'info';
+          const timestamp = document.createElement('time');
+          timestamp.textContent = time(event.time);
+          const message = document.createElement('span');
+          message.className = 'event-text';
+          message.textContent = String(event.text || '');
+          row.append(timestamp, message);
+          fragment.append(row);
+        }
+        elements.events.replaceChildren(fragment);
+        elements['log-empty'].hidden = events.length > 0;
+      }
+    }
+
+    async function poll() {
+      if (fetching) return;
+      fetching = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
+      try {
+        const response = await fetch('/estado', { cache:'no-store', signal:controller.signal });
+        if (!response.ok) throw new Error('Monitor indisponível');
+        const next = await response.json();
+        if (!next || typeof next.connected !== 'boolean') throw new Error('Resposta inválida');
+        current = next;
+        fetchFailed = false;
+      } catch (error) {
+        fetchFailed = true;
+      } finally {
+        clearTimeout(timeout);
+        fetching = false;
+        render();
+      }
+    }
+    poll();
+    setInterval(poll, 1000);
+    setInterval(render, 500);
+  </script>
+</body>
+</html>
