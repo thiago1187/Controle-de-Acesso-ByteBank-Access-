@@ -21,9 +21,9 @@ RAIZ = Path(__file__).resolve().parent.parent / "esp32"
 
 
 class PinFalso:
-    IN, OUT = 0, 1
+    IN, OUT, PULL_DOWN = 0, 1, 2
 
-    def __init__(self, numero, modo=None):
+    def __init__(self, numero, modo=None, pull=None):
         self.numero = numero
         self.valor = 0
         self.historico = []  # tudo que foi escrito, para conferir depois

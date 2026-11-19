@@ -155,7 +155,8 @@ def buscar_comando():
 
 def rodar():
     apagar_luzes()
-    pir = Pin(PINO_PIR, Pin.IN)
+    # PULL_DOWN: sem o PIR ligado, o pino fica em 0 e não inventa presença
+    pir = Pin(PINO_PIR, Pin.IN, Pin.PULL_DOWN)
 
     try:
         leitor = MFRC522(PINO_SCK, PINO_MOSI, PINO_MISO, PINO_RST, PINO_SDA)

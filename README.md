@@ -75,6 +75,8 @@ Os nomes são os que estão impressos nas placas.
 
 O RC522 só aguenta 3,3 V. Nunca ligue ele no VIN.
 
+O PIR é opcional para rodar. Sem ele, o pino D33 fica em 0 e todo acesso vai com `presenca: false`.
+
 ![ESP32, RC522 e semáforo com os rótulos dos pinos](docs/ligacao-bancada.jpg)
 
 ## Estrutura do repositório
