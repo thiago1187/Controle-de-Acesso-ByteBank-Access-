@@ -8,9 +8,9 @@ Este é o Módulo 6 do projeto da AV2 de Algoritmo e Estrutura de Dados (CESAR S
 - Thiago Alves
 - José Bruno
 
-## O que o módulo vai fazer
+## O que o projeto faz
 
-Uma pessoa encosta o cartão no leitor RFID. O ESP32 procura o cartão em uma Tabela Hash guardada na própria memória e descobre quem é e qual a categoria. Uma luz mostra o resultado e o acesso é liberado:
+Uma pessoa encosta o cartão no leitor RFID. O ESP32 manda o UID do cartão para a API. A API procura o cartão em uma Tabela Hash, decide se libera e grava a tentativa no banco. A placa acende a luz da categoria:
 
 | Categoria | Luz | Acesso |
 | --- | --- | --- |
@@ -19,95 +19,90 @@ Uma pessoa encosta o cartão no leitor RFID. O ESP32 procura o cartão em uma Ta
 | Visita | Vermelha | Liberado |
 | Cartão não cadastrado | As 3 piscam | Negado |
 
-O sensor de presença (PIR) serve para saber se tem alguém perto da porta. Ele entra no registro de cada acesso.
+O sensor de presença (PIR) avisa se tem alguém perto da porta e entra no registro de cada acesso. No lugar do módulo relé da especificação usamos o semáforo de LEDs: "liberar trava" acende a luz verde.
 
-Os últimos 20 acessos ficam guardados na placa em um Ring Buffer (fila circular). Cada tentativa de acesso também é enviada pela rede para a API em Python, que grava no banco de dados, na tabela `audit_access_logs`, com data e hora, ID do usuário e resultado da tentativa. Um dashboard em Streamlit mostra esses dados e envia comandos de volta para a placa.
+O dashboard em Streamlit mostra os acessos em tempo real e manda comandos para a placa.
 
 ## Arquitetura
 
 ![Diagrama da arquitetura em 4 camadas](docs/arquitetura.png)
 
-| Camada | O que faz | Estruturas de dados |
-| --- | --- | --- |
-| Borda (ESP32 + MicroPython) | Lê o RFID e o PIR, acende a luz da categoria, conecta no Wi-Fi e envia os dados | Tabela Hash local e Ring Buffer de 20 acessos |
-| API Backend (Python) | Recebe o JSON, valida e aplica as regras de negócio | Tabela Hash em memória, busca em O(1) |
-| BD Relacional | Guarda o histórico de acessos | Tabela `audit_access_logs` |
-| Dashboard (Streamlit) | Mostra os dados em tempo real e envia comandos para a placa | - |
+| Camada | Arquivo | O que faz | Estrutura de dados |
+| --- | --- | --- | --- |
+| Borda | `esp32/main.py` | Lê o cartão e o PIR, acende a luz, envia o JSON e busca comandos | Ring Buffer (20 últimos acessos) e Tabela Hash local (cartões já liberados, para quando a rede cair) |
+| API | `api/app.py` | Recebe o JSON, valida, decide o acesso e grava no banco | Tabela Hash em memória, busca O(1) |
+| Banco | `api/schema.sql` | Guarda usuários, logs de auditoria, saldos e transações | Tabela `audit_access_logs` |
+| Dashboard | `dashboard/painel.py` | Mostra os acessos e envia comandos | - |
+
+Caminho de um acesso:
+
+```
+cartão -> ESP32 --POST /acessos--> API (Tabela Hash) --> banco (audit_access_logs)
+                                                           |
+                                         dashboard <-------+  (lê a cada 2 s)
+dashboard --POST /comandos--> API --GET /comandos/proximo--> ESP32 (a cada 2 s)
+```
 
 ## Hardware
 
-- ESP32 com MicroPython
+- ESP32 DevKit (ESP-WROOM-32) com MicroPython
 - Leitor RFID RC522 com cartão e chaveiro (tag)
 - Sensor de presença PIR
-- Módulo semáforo com 3 LEDs (amarelo, verde e vermelho)
+- Módulo semáforo com 3 LEDs (pinos R, Y, G e GND)
 - Protoboard e jumpers
 
-### Pinos
+### Ligações
 
-O RC522 liga só no 3V3. Se o módulo semáforo não tiver resistor, use um de 220 ohms em cada LED.
+Os nomes são os que estão impressos nas placas.
 
-| Componente | Sinal | Pino do ESP32 |
-| --- | --- | --- |
-| RFID RC522 | SDA (SS) | GPIO 5 |
-| RFID RC522 | SCK | GPIO 18 |
-| RFID RC522 | MOSI | GPIO 23 |
-| RFID RC522 | MISO | GPIO 19 |
-| RFID RC522 | RST | GPIO 22 |
-| Sensor PIR | OUT | GPIO 33 |
-| LED amarelo (VIP) | Ânodo | GPIO 26 |
-| LED verde (Estágio) | Ânodo | GPIO 25 |
-| LED vermelho (Visita) | Ânodo | GPIO 27 |
+| De | Para (ESP32) |
+| --- | --- |
+| RC522 SDA | D5 |
+| RC522 SCK | D18 |
+| RC522 MOSI | D23 |
+| RC522 MISO | D19 |
+| RC522 IRQ | não liga |
+| RC522 GND | GND |
+| RC522 RST | D22 |
+| RC522 3V3 | 3V3 |
+| Semáforo R (vermelho, visita) | D27 |
+| Semáforo Y (amarelo, VIP) | D26 |
+| Semáforo G (verde, estágio) | D25 |
+| Semáforo GND | GND |
+| PIR VCC | VIN (5 V) |
+| PIR OUT | D33 |
+| PIR GND | GND |
+
+O RC522 só aguenta 3,3 V. Nunca ligue ele no VIN.
+
+![ESP32, RC522 e semáforo com os rótulos dos pinos](docs/ligacao-bancada.jpg)
 
 ## Estrutura do repositório
 
 ```
 esp32/
   boot.py                  conecta o ESP32 ao Wi-Fi
-  main.py                  lê o cartão e o PIR, acende a luz e envia o JSON
-  estruturas.py            Tabela Hash dos cartões e Ring Buffer dos acessos
+  main.py                  lê o cartão, fala com a API, acende a luz e executa comandos
+  estruturas.py            Tabela Hash e Ring Buffer
   mfrc522.py               biblioteca do leitor RC522 (ver Créditos)
   LICENSE_mfrc522.txt      licença da biblioteca
   config_wifi.example.py   modelo para o arquivo com a senha do Wi-Fi
 api/
-  app.py                   API em Flask: recebe o JSON do ESP32 e grava no banco
-  schema.sql               tabelas do banco (usuarios, audit_access_logs, saldos, transacoes)
-  requirements.txt         dependência da API (Flask)
-docs/
-  arquitetura.png          diagrama de arquitetura
-tests/
-  test_boot.py             testes do boot.py rodando no computador
-  test_estruturas.py       testes da Tabela Hash e do Ring Buffer
-  test_main.py             testes do fluxo do main.py
-  test_api.py              testes da API com banco temporário
+  app.py                   API em Flask
+  schema.sql               tabelas do banco
+  requirements.txt
+dashboard/
+  painel.py                dashboard em Streamlit
+  requirements.txt
+docs/                      diagrama e fotos
+tests/                     testes (rodam no computador)
 ```
 
-O dashboard entra na próxima entrega.
+## Como rodar tudo
 
-## Entrega 2: como o main.py funciona
+Precisa de Python 3 no computador. A placa e o computador ficam na mesma rede Wi-Fi (2,4 GHz).
 
-1. Liga o leitor RC522 e os 3 LEDs.
-2. Fica lendo o cartão a cada 100 ms. O sensor PIR avisa quando tem alguém por perto.
-3. Com o cartão lido, procura o UID na Tabela Hash (`cartoes`). A busca é O(1).
-4. Se achou, acende a luz da categoria por 3 segundos. Se não achou, as 3 luzes piscam.
-5. Guarda o acesso no Ring Buffer (os 20 últimos ficam na memória da placa).
-6. Envia um JSON com `urequests.post()` para a nossa API (`URL_API` no `main.py`). Quando dá certo, o terminal mostra `Servidor respondeu: 201`. Na Entrega 2 o envio foi testado com `http://httpbin.org/post`, um servidor de teste que só devolve o que recebe.
-
-Exemplo do JSON enviado:
-
-```
-{"uid": "01020304", "nome": "Pessoa VIP", "categoria": "vip",
- "resultado": "liberado", "presenca": false, "uptime_ms": 12345}
-```
-
-Os nomes e UIDs que aparecem no código são de teste. Para cadastrar um cartão seu, rode o `main.py`, encoste o cartão e copie o UID que aparece em "Cartão não cadastrado". Depois coloque esse UID em uma linha `cartoes.cadastrar(...)` do `main.py`.
-
-O servidor de teste usa HTTP sem criptografia. Por isso só vão dados de teste, nada de dado real de pessoa.
-
-## Entrega 3: API e banco de dados
-
-Escolhemos Flask e SQLite porque são os mais simples de rodar: Flask é uma dependência só, e o SQLite é um arquivo (`api/bytebank.db`), sem servidor de banco.
-
-### Como rodar
+**1. API** (terminal 1)
 
 ```
 cd api
@@ -115,74 +110,100 @@ pip install -r requirements.txt
 python app.py
 ```
 
-A API sobe em `http://0.0.0.0:5000`. Na primeira vez ela cria as tabelas do `schema.sql`, cadastra três cartões de exemplo e carrega a Tabela Hash. Para o ESP32 chegar nela, descubra o IP do computador (`ipconfig` no Windows, `ip a` no Linux) e coloque em `URL_API` no `main.py`, por exemplo `http://192.168.0.10:5000/acessos`. Placa e computador precisam estar na mesma rede Wi-Fi.
+Na primeira vez ela cria o banco `api/bytebank.db`, cadastra três cartões de exemplo e carrega a Tabela Hash.
 
-### O que a API faz
-
-| Rota | O que faz |
-| --- | --- |
-| `POST /acessos` | Recebe o JSON do ESP32. Procura o `uid` na Tabela Hash (O(1)), decide `liberado` ou `negado` e grava em `audit_access_logs` com timestamp, usuário e resultado. Grava sempre, mesmo cartão desconhecido. |
-| `GET /acessos` | Últimos acessos gravados (o dashboard vai ler daqui). |
-| `GET /usuarios` | Cartões cadastrados. |
-| `POST /usuarios` | Cadastra um cartão novo no banco e na Tabela Hash. |
-| `POST /transacoes` | Depósito ou saque. Atualiza `saldos` e grava em `transacoes` na mesma transação SQL. |
-| `GET /saldos/<uid>` | Saldo de um usuário. |
-
-### Tabela Hash e atualização atômica
-
-A Tabela Hash da API é um `dict` do Python carregado da tabela `usuarios` quando o servidor sobe. A busca por `uid` é O(1), então a validação do cartão não depende de consulta ao banco.
-
-A atualização atômica aparece em `POST /transacoes`: o `UPDATE` do saldo e o `INSERT` da transação ficam dentro de um mesmo bloco `with`, que é uma transação SQL. Se o saque deixar o saldo negativo, o `CHECK (saldo >= 0)` do `schema.sql` falha e o banco desfaz tudo. O teste `test_saque_maior_que_saldo_nao_grava_nada` confere isso.
-
-Exemplo de teste com `curl`, com a API rodando:
+**2. Dashboard** (terminal 2)
 
 ```
-curl -X POST http://localhost:5000/acessos -H "Content-Type: application/json" -d "{\"uid\": \"01020304\", \"presenca\": true}"
+cd dashboard
+pip install -r requirements.txt
+streamlit run painel.py
 ```
 
-Resposta: `{"categoria": "vip", "log_id": 1, "nome": "Pessoa VIP", "resultado": "liberado", "uid": "01020304"}`.
+Abre no navegador em `http://localhost:8501`.
 
-## Como rodar na placa
+**3. Placa**
 
-1. Instale o firmware do MicroPython no ESP32 (baixe a versão para ESP32 em micropython.org/download).
-2. Copie `esp32/config_wifi.example.py` com o nome `config_wifi.py` e preencha o nome e a senha da sua rede. O ESP32 só conecta em rede de 2,4 GHz.
-3. Envie para a placa `boot.py`, `config_wifi.py`, `main.py`, `estruturas.py` e `mfrc522.py`. No Thonny, abra cada arquivo e use "Salvar como" e depois "Dispositivo MicroPython".
-4. Reinicie a placa. A saída aparece no terminal do Thonny. Quando dá certo, aparece algo assim:
+1. Descubra o IP do computador (`ipconfig` no Windows) e coloque em `URL_API` no `esp32/main.py`, por exemplo `http://192.168.0.10:5000`.
+2. Copie `config_wifi.example.py` com o nome `config_wifi.py` e preencha nome e senha da rede. Esse arquivo não vai para o GitHub.
+3. No Thonny, envie para a placa `boot.py`, `config_wifi.py`, `main.py`, `estruturas.py` e `mfrc522.py` ("Salvar como" e depois "Dispositivo MicroPython").
+4. Aperte EN na placa. O terminal mostra:
 
 ```
-Conectando à rede 'NomeDaRede' (tentativa 1 de 3)...
 Wi-Fi conectado! IP: 192.168.0.50
 ByteBank Access pronto. Aproxime um cartão.
-Acesso liberado: Pessoa VIP | categoria: vip
-Servidor respondeu: 200
+Servidor respondeu: 201
+Acesso liberado | categoria: vip | decidido: api
 Ring Buffer: 1 de 20 acessos guardados
 ```
 
-O `config_wifi.py` está no `.gitignore`. A senha do Wi-Fi não vai para o GitHub.
+### Cadastrar um cartão
 
-Se não conectar depois de 3 tentativas, o `boot.py` avisa no terminal e deixa a placa ligada, para o `main.py` poder guardar os acessos na fila local.
+Encoste o cartão. Se ele não estiver cadastrado, o terminal mostra `Acesso negado, UID: a1b2c3d4` e o dashboard mostra o UID na tabela. Cadastre na API:
+
+```
+curl -X POST http://localhost:5000/usuarios -H "Content-Type: application/json" -d "{\"uid\": \"a1b2c3d4\", \"nome\": \"Thiago\", \"categoria\": \"vip\"}"
+```
+
+Também dá para trocar os UIDs de exemplo em `USUARIOS_INICIAIS`, no `api/app.py`, antes de criar o banco. O cadastro fica só na API. A placa não precisa ser regravada.
+
+## Estruturas de dados
+
+**Tabela Hash (API).** Um `dict` do Python carregado da tabela `usuarios` quando a API sobe. A chave é o UID do cartão. A busca é O(1), então a decisão não espera consulta ao banco.
+
+**Tabela Hash (placa).** Guarda os cartões que a API já liberou. Se o Wi-Fi ou a API caírem, a placa ainda reconhece esses cartões. Cartão nunca visto é negado.
+
+**Ring Buffer (placa).** Fila circular com os 20 últimos acessos. Quando enche, o novo toma o lugar do mais antigo, e a memória da placa não cresce. O comando "resetar contador" do dashboard zera essa fila.
+
+**Atualização atômica (API).** Em `POST /transacoes`, o `UPDATE` do saldo e o `INSERT` da transação ficam no mesmo bloco `with`, que é uma transação SQL. Se o saque deixar o saldo negativo, o `CHECK (saldo >= 0)` do `schema.sql` falha e o banco desfaz tudo.
+
+## Rotas da API
+
+| Rota | Quem usa | O que faz |
+| --- | --- | --- |
+| `POST /acessos` | ESP32 | Recebe `{"uid", "presenca"}`, decide e grava em `audit_access_logs` com timestamp, usuário e resultado |
+| `GET /acessos` | Dashboard | Últimos acessos |
+| `POST /comandos` | Dashboard | Coloca um comando na fila (`liberar`, `alarme` ou `resetar`) |
+| `GET /comandos/proximo` | ESP32 | Entrega o comando mais antigo e tira da fila |
+| `GET /usuarios`, `POST /usuarios` | Grupo | Lista e cadastra cartões |
+| `POST /transacoes`, `GET /saldos/<uid>` | Grupo | Depósito, saque e saldo |
+
+## Comandos do dashboard
+
+| Botão | O que a placa faz |
+| --- | --- |
+| Liberar trava | Acende a luz verde por 3 s |
+| Acionar alarme | Pisca as 3 luzes 6 vezes |
+| Resetar contador | Zera o Ring Buffer |
+
+A placa pergunta à API a cada 2 segundos se tem comando novo. Por isso o comando leva até 2 s para chegar.
 
 ## Testes
 
-Os testes rodam no computador com Python 3. Os da placa usam módulos de mentira (`machine`, `network`, `urequests` e o leitor) para simular o ESP32. Os da API usam um banco SQLite temporário e cobrem acesso liberado, negado, cadastro de cartão, depósito, saque e saque sem saldo (nada é gravado). Cobrem o `boot.py` (conexão, senha errada, falha do rádio, senha nunca aparece na saída), a Tabela Hash, o Ring Buffer (inclusive quando enche e sobrescreve o mais antigo) e o fluxo do `main.py` (cartão liberado, não cadastrado, falha de rede e repetição do mesmo cartão).
-
 ```
+pip install flask streamlit pandas requests
 python -m unittest discover tests -v
 ```
 
-Esses testes conferem a lógica do código. Eles não substituem o teste na placa de verdade.
+| Arquivo | O que confere |
+| --- | --- |
+| `test_boot.py` | Conexão Wi-Fi, senha errada, senha nunca aparece na saída |
+| `test_estruturas.py` | Tabela Hash e Ring Buffer (cheio, sobrescreve o mais antigo, limpar) |
+| `test_main.py` | Fluxo da placa com hardware simulado: luz certa por categoria, negado pisca, sem Wi-Fi usa a hash local, comandos |
+| `test_api.py` | Rotas da API, saque sem saldo não grava nada, comando chega uma vez só |
+| `test_ponta_a_ponta.py` | Fluxo completo: sobe a API, faz o papel do ESP32, abre o dashboard, clica em "Liberar trava" e confere que o comando chega na placa. Também manda 30 acessos seguidos sem travar |
+
+Os testes da placa usam módulos de mentira (`machine`, `network`, `urequests` e o leitor). Eles conferem a lógica, mas não substituem o teste na bancada.
 
 ## Teste no simulador
 
-Antes da bancada, o circuito e o código foram rodados no simulador Wokwi (ESP32 com MicroPython, Wi-Fi `Wokwi-GUEST`). O cartão foi lido, a categoria identificada e o servidor respondeu 200. No simulador os UIDs são os dos cartões de teste do Wokwi (`01020304`, `11223344` e `55667788`). Na bancada, troque pelos UIDs dos nossos cartões.
+Antes da bancada, o circuito e o código foram rodados no Wokwi (ESP32 com MicroPython, Wi-Fi `Wokwi-GUEST`). O cartão foi lido, a categoria identificada e o servidor respondeu.
 
 ## Circuito na bancada
 
 ![Circuito montado na bancada](docs/circuito-bancada.jpg)
 
-Foto de 05/11, durante a montagem: ESP32, leitor RC522, módulo semáforo (amarelo, verde e vermelho) e a tag azul.
-
-Situação nesse momento: a placa roda o `main.py` e mostra "Aproxime um cartão" no terminal. O leitor ainda não respondeu na bancada (a leitura do registrador de versão do chip volta 0x0). Estamos conferindo a ligação dos fios. O fluxo completo (cartão, categoria, luz e envio do JSON) já foi validado no simulador.
+Foto de 05/11, durante a montagem. Nessa data o leitor ainda não respondia na bancada (registrador de versão do chip voltava 0x0). Refizemos as ligações conforme a tabela acima.
 
 ## Créditos
 
@@ -190,12 +211,8 @@ A leitura do RC522 usa a biblioteca `micropython-mfrc522` de Stefan Wendler (lic
 
 ## Andamento
 
-- [ ] Entrega 1 (29/10): repositório, README, diagrama e `boot.py` prontos. Falta registrar o teste do `boot.py` na placa.
-- [ ] Entrega 2 (05/11): `main.py`, estruturas em memória e envio de JSON prontos e testados no simulador. Falta a foto do circuito na bancada.
-- [x] Entrega 3 (12/11): API em Flask, `schema.sql` e banco SQLite, com testes
-- [ ] Entrega 4 (19/11): dashboard em Streamlit e teste de ponta a ponta
+- [x] Entrega 1 (29/10): repositório, README, diagrama e `boot.py`
+- [x] Entrega 2 (05/11): `main.py`, estruturas em memória e envio de JSON, foto da bancada
+- [x] Entrega 3 (12/11): API em Flask, `schema.sql` e banco SQLite
+- [x] Entrega 4 (19/11): dashboard em Streamlit, comandos para a placa e teste de ponta a ponta
 - [ ] Entrega final (26/11): demonstração na bancada
-
-## Ainda a definir pelo grupo
-
-- Papel exato do sensor PIR no fluxo de acesso

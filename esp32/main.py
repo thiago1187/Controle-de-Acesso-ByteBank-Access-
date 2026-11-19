@@ -1,10 +1,11 @@
 # main.py - ByteBank Access (ESP32 + MicroPython)
 #
 # O boot.py já conectou no Wi-Fi. Aqui o ESP32:
-#   1. lê o cartão no leitor RFID (RC522);
-#   2. procura o cartão na Tabela Hash e descobre a categoria da pessoa;
+#   1. lê o cartão no leitor RFID (RC522) e manda o UID para a API;
+#   2. a API responde se o acesso foi liberado e qual a categoria da pessoa;
 #   3. acende a luz da categoria (amarelo = VIP, verde = estágio, vermelho = visita);
-#   4. guarda o acesso no Ring Buffer (últimos 20) e envia um JSON para o servidor.
+#   4. guarda o acesso no Ring Buffer (últimos 20) e na Tabela Hash local (cache);
+#   5. de 2 em 2 segundos pergunta à API se o dashboard mandou algum comando.
 
 import time
 import network
@@ -24,21 +25,18 @@ LEDS = {
     "visita": Pin(27, Pin.OUT),   # vermelho
 }
 
-# Servidor de teste da Entrega 2. Na Entrega 3 troca pela nossa API.
-# Endereço da nossa API (Entrega 3). Troque pelo IP do computador que roda o app.py.
-# Para testar sem a API, pode usar "http://httpbin.org/post", que só devolve o que recebe.
-URL_API = "http://192.168.0.10:5000/acessos"
+# Endereço da API (api/app.py). Troque pelo IP do computador que roda a API.
+URL_API = "http://192.168.0.10:5000"
 
-SEGUNDOS_LUZ = 3          # tempo que a luz fica acesa
+SEGUNDOS_LUZ = 3                  # tempo que a luz fica acesa
 INTERVALO_MESMO_CARTAO_MS = 2000  # ignora o mesmo cartão lido de novo logo em seguida
+INTERVALO_COMANDOS_MS = 2000      # de quanto em quanto tempo pergunta por comandos
 
-# Cartões cadastrados. Os UIDs abaixo são exemplos: troque pelos dos nossos cartões.
-# Cartão desconhecido mostra o UID no terminal, é só copiar para cá.
+# Tabela Hash local: guarda os cartões que a API já liberou.
+# Se o Wi-Fi cair, a placa ainda reconhece esses cartões (autenticação local).
 cartoes = TabelaCartoes()
-cartoes.cadastrar("11111111", "Pessoa VIP", "vip")
-cartoes.cadastrar("22222222", "Estagiario", "estagio")
-cartoes.cadastrar("33333333", "Visitante", "visita")
 
+# Ring Buffer: os 20 últimos acessos ficam na memória da placa.
 ultimos_acessos = RingBuffer(20)
 
 
@@ -48,13 +46,19 @@ def apagar_luzes():
 
 
 def piscar_todas(vezes=3):
-    """Cartão não cadastrado: as três luzes piscam juntas."""
+    """Cartão negado ou alarme: as três luzes piscam juntas."""
     for _ in range(vezes):
         for led in LEDS.values():
             led.value(1)
         time.sleep_ms(200)
         apagar_luzes()
         time.sleep_ms(200)
+
+
+def acender(categoria):
+    LEDS[categoria].value(1)
+    time.sleep(SEGUNDOS_LUZ)
+    apagar_luzes()
 
 
 def ler_uid(leitor):
@@ -68,50 +72,85 @@ def ler_uid(leitor):
     return "%02x%02x%02x%02x" % (bruto[0], bruto[1], bruto[2], bruto[3])
 
 
-def enviar(payload):
-    """Manda o JSON para o servidor. Devolve True se deu certo."""
-    if not network.WLAN(network.STA_IF).isconnected():
-        print("Sem Wi-Fi: o acesso fica só no Ring Buffer.")
-        return False
+def tem_wifi():
+    return network.WLAN(network.STA_IF).isconnected()
+
+
+def perguntar_api(uid, presenca):
+    """Manda o UID para a API. Devolve o JSON da resposta, ou None se falhou."""
+    if not tem_wifi():
+        print("Sem Wi-Fi.")
+        return None
     try:
-        resposta = urequests.post(URL_API, json=payload)
-        ok = 200 <= resposta.status_code < 300
+        resposta = urequests.post(URL_API + "/acessos", json={"uid": uid, "presenca": presenca})
         print("Servidor respondeu:", resposta.status_code)
+        dados = resposta.json() if resposta.status_code == 201 else None
         resposta.close()
-        return ok
+        return dados
     except (OSError, ValueError) as erro:
         print("Falha ao enviar:", erro)
-        return False
+        return None
 
 
 def tratar_cartao(uid, presenca):
-    """Decide o acesso, acende a luz, guarda no Ring Buffer e envia."""
-    achado = cartoes.buscar(uid)
+    """Pergunta à API, acende a luz e guarda o acesso no Ring Buffer."""
+    resposta = perguntar_api(uid, presenca)
 
-    if achado is None:
-        nome, categoria, resultado = None, None, "negado"
-        print("Cartão não cadastrado, UID:", uid)
-        piscar_todas()
+    if resposta is not None:
+        # A API decidiu. Se liberou, guarda na Tabela Hash local.
+        categoria = resposta.get("categoria")
+        resultado = resposta.get("resultado")
+        if resultado == "liberado":
+            cartoes.cadastrar(uid, resposta.get("nome"), categoria)
+        origem = "api"
     else:
-        nome, categoria = achado
-        resultado = "liberado"
-        print("Acesso liberado:", nome, "| categoria:", categoria)
-        LEDS[categoria].value(1)
-        time.sleep(SEGUNDOS_LUZ)
-        apagar_luzes()
+        # Sem API: usa a Tabela Hash local (só conhece cartões já liberados antes).
+        achado = cartoes.buscar(uid)
+        categoria = achado[1] if achado else None
+        resultado = "liberado" if achado else "negado"
+        origem = "local"
 
-    payload = {
+    if resultado == "liberado":
+        print("Acesso liberado | categoria:", categoria, "| decidido:", origem)
+        acender(categoria)
+    else:
+        print("Acesso negado, UID:", uid, "| decidido:", origem)
+        piscar_todas()
+
+    ultimos_acessos.adicionar({
         "uid": uid,
-        "nome": nome,
         "categoria": categoria,
         "resultado": resultado,
         "presenca": presenca,
+        "origem": origem,
         "uptime_ms": time.ticks_ms(),
-    }
-    registro = dict(payload)
-    registro["enviado"] = enviar(payload)
-    ultimos_acessos.adicionar(registro)
+    })
     print("Ring Buffer:", len(ultimos_acessos), "de 20 acessos guardados")
+
+
+def executar_comando(comando):
+    """Comandos que vêm do dashboard."""
+    print("Comando recebido:", comando)
+    if comando == "liberar":
+        acender("estagio")          # luz verde: trava liberada pelo dashboard
+    elif comando == "alarme":
+        piscar_todas(vezes=6)
+    elif comando == "resetar":
+        ultimos_acessos.limpar()
+        print("Ring Buffer zerado.")
+
+
+def buscar_comando():
+    """Pergunta à API se tem comando pendente. Devolve o nome do comando ou None."""
+    if not tem_wifi():
+        return None
+    try:
+        resposta = urequests.get(URL_API + "/comandos/proximo")
+        dados = resposta.json() if resposta.status_code == 200 else {}
+        resposta.close()
+        return dados.get("comando")
+    except (OSError, ValueError):
+        return None
 
 
 def rodar():
@@ -127,6 +166,7 @@ def rodar():
     print("ByteBank Access pronto. Aproxime um cartão.")
     ultimo_uid = None
     ultimo_tempo = 0
+    ultimo_comando = time.ticks_ms() - INTERVALO_COMANDOS_MS  # já pergunta na primeira volta
     havia_presenca = False
 
     while True:
@@ -148,6 +188,13 @@ def rodar():
                 tratar_cartao(uid, presenca)
             ultimo_uid = uid
             ultimo_tempo = time.ticks_ms()
+
+        agora = time.ticks_ms()
+        if time.ticks_diff(agora, ultimo_comando) >= INTERVALO_COMANDOS_MS:
+            comando = buscar_comando()
+            if comando:
+                executar_comando(comando)
+            ultimo_comando = agora
 
         time.sleep_ms(100)
 

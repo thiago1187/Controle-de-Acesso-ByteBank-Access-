@@ -14,6 +14,16 @@ from estruturas import RingBuffer, TabelaCartoes  # noqa: E402
 
 
 class TestRingBuffer(unittest.TestCase):
+    def test_limpar_zera_e_volta_a_funcionar(self):
+        fila = RingBuffer(3)
+        for n in range(5):
+            fila.adicionar(n)
+        fila.limpar()
+        self.assertEqual(len(fila), 0)
+        self.assertEqual(fila.listar(), [])
+        fila.adicionar("novo")
+        self.assertEqual(fila.listar(), ["novo"])
+
     def test_comeca_vazio(self):
         fila = RingBuffer(20)
         self.assertEqual(len(fila), 0)

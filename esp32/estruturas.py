@@ -30,6 +30,11 @@ class RingBuffer:
         return [self.dados[(self.inicio + i) % self.capacidade]
                 for i in range(self.tamanho)]
 
+    def limpar(self):
+        """Zera a fila (comando "resetar" do dashboard)."""
+        self.inicio = 0
+        self.tamanho = 0
+
     def __len__(self):
         return self.tamanho
 

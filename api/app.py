@@ -31,6 +31,10 @@ app = Flask(__name__)
 # O dict do Python é uma tabela hash, então a busca por uid é O(1).
 cartoes = {}
 
+# Comandos que o dashboard mandou e o ESP32 ainda não buscou (fila simples).
+COMANDOS_VALIDOS = ("liberar", "alarme", "resetar")
+comandos_pendentes = []
+
 
 def conectar():
     con = sqlite3.connect(CAMINHO_BANCO)
@@ -193,6 +197,24 @@ def registrar_transacao():
         return jsonify({"erro": "Saldo insuficiente"}), 422
 
     return jsonify({"uid": uid, "tipo": tipo, "valor": valor, "saldo": saldo}), 201
+
+
+@app.post("/comandos")
+def enviar_comando():
+    """O dashboard chama aqui. O comando fica na fila até o ESP32 buscar."""
+    dados = request.get_json(silent=True) or {}
+    comando = dados.get("comando")
+    if comando not in COMANDOS_VALIDOS:
+        return jsonify({"erro": "Comando precisa ser um destes: " + ", ".join(COMANDOS_VALIDOS)}), 400
+    comandos_pendentes.append(comando)
+    return jsonify({"comando": comando, "na_fila": len(comandos_pendentes)}), 201
+
+
+@app.get("/comandos/proximo")
+def proximo_comando():
+    """O ESP32 chama a cada 2 s. Devolve o comando mais antigo e tira da fila."""
+    comando = comandos_pendentes.pop(0) if comandos_pendentes else None
+    return jsonify({"comando": comando})
 
 
 @app.get("/saldos/<uid>")

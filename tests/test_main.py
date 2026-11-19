@@ -62,23 +62,43 @@ class LeitorFalso:
 
 
 class RespostaFalsa:
-    def __init__(self, status):
+    def __init__(self, status, dados=None):
         self.status_code = status
+        self.dados = dados or {}
+
+    def json(self):
+        return self.dados
 
     def close(self):
         pass
 
 
-def rodar_main(roteiro, wifi=True, status_post=200, erro_post=None, pir=0):
+# Cartões que a API "conhece" nos testes
+CATEGORIAS_API = {"11111111": "vip", "22222222": "estagio", "33333333": "visita"}
+
+
+def rodar_main(roteiro, wifi=True, status_post=201, erro_post=None, pir=0, comandos=None):
     """Executa o main.py com tudo simulado. Devolve (módulo, saída, chamadas de post)."""
     LeitorFalso.roteiro = roteiro
     chamadas = []
+    fila_comandos = list(comandos or [])
 
     def post(url, json=None):
         chamadas.append((url, json))
         if erro_post:
             raise erro_post
-        return RespostaFalsa(status_post)
+        categoria = CATEGORIAS_API.get(json["uid"])
+        resposta = {
+            "uid": json["uid"],
+            "resultado": "liberado" if categoria else "negado",
+            "categoria": categoria,
+            "nome": "Pessoa " + categoria if categoria else None,
+        }
+        return RespostaFalsa(status_post, resposta)
+
+    def get(url):
+        comando = fila_comandos.pop(0) if fila_comandos else None
+        return RespostaFalsa(200, {"comando": comando})
 
     relogio = {"t": 0}
     tempo = types.ModuleType("time")
@@ -96,6 +116,7 @@ def rodar_main(roteiro, wifi=True, status_post=200, erro_post=None, pir=0):
 
     requisicoes = types.ModuleType("urequests")
     requisicoes.post = post
+    requisicoes.get = get
 
     rfid = types.ModuleType("mfrc522")
     rfid.MFRC522 = LeitorFalso
@@ -134,72 +155,69 @@ class TestMain(unittest.TestCase):
             with self.subTest(categoria=categoria):
                 modulo, texto, _ = rodar_main([uid])
                 self.assertEqual(modulo.LEDS[categoria].numero, pino)
-                # acendeu (1) e depois apagou (0)
                 self.assertIn(1, modulo.LEDS[categoria].historico)
                 self.assertEqual(modulo.LEDS[categoria].valor, 0)
-                # as outras duas nunca acenderam
                 for outra, led in modulo.LEDS.items():
                     if outra != categoria:
                         self.assertNotIn(1, led.historico)
                 self.assertIn("Acesso liberado", texto)
 
-    def test_cartao_desconhecido_pisca_as_tres_e_avisa_o_uid(self):
-        modulo, texto, chamadas = rodar_main(["deadbeef"])
+    def test_cartao_negado_pela_api_pisca_as_tres(self):
+        modulo, texto, _ = rodar_main(["deadbeef"])
         for led in modulo.LEDS.values():
             self.assertEqual(led.historico.count(1), 3)
             self.assertEqual(led.valor, 0)
         self.assertIn("deadbeef", texto)
-        self.assertEqual(chamadas[0][1]["resultado"], "negado")
 
-    def test_json_enviado_tem_os_campos_combinados(self):
+    def test_json_enviado_tem_uid_e_presenca(self):
         _, _, chamadas = rodar_main(["11111111"])
         url, json = chamadas[0]
         self.assertTrue(url.endswith("/acessos"))
-        self.assertEqual(set(json), {"uid", "nome", "categoria", "resultado", "presenca", "uptime_ms"})
-        self.assertEqual(json["categoria"], "vip")
-        self.assertEqual(json["resultado"], "liberado")
-        self.assertFalse(json["presenca"])
+        self.assertEqual(json, {"uid": "11111111", "presenca": False})
 
     def test_presenca_do_pir_vai_no_json(self):
         _, texto, chamadas = rodar_main(["22222222"], pir=1)
         self.assertTrue(chamadas[0][1]["presenca"])
         self.assertIn("Presença detectada", texto)
 
-    def test_sem_wifi_nao_envia_mas_guarda_no_ring_buffer(self):
+    def test_cartao_liberado_entra_na_tabela_hash_local(self):
+        modulo, _, _ = rodar_main(["11111111"])
+        self.assertEqual(modulo.cartoes.buscar("11111111")[1], "vip")
+        self.assertIsNone(modulo.cartoes.buscar("deadbeef"))
+
+    def test_sem_wifi_usa_hash_local_e_nega_desconhecido(self):
         modulo, texto, chamadas = rodar_main(["11111111"], wifi=False)
         self.assertEqual(chamadas, [])
         self.assertIn("Sem Wi-Fi", texto)
         acessos = modulo.ultimos_acessos.listar()
-        self.assertEqual(len(acessos), 1)
-        self.assertFalse(acessos[0]["enviado"])
+        self.assertEqual(acessos[0]["resultado"], "negado")
+        self.assertEqual(acessos[0]["origem"], "local")
+
+    def test_api_fora_do_ar_usa_cartao_ja_conhecido(self):
+        # Primeiro com API (cartão entra na hash). Depois a API cai e o cartão
+        # continua liberado pela hash local.
+        modulo, _, _ = rodar_main(["11111111"])
+        cache = dict(modulo.cartoes.cartoes)
+        modulo2, texto, _ = rodar_main(["11111111"], erro_post=OSError("timeout"))
+        modulo2.cartoes.cartoes.update(cache)
+        modulo2.tratar_cartao("11111111", False)
+        self.assertEqual(modulo2.ultimos_acessos.listar()[-1]["resultado"], "liberado")
+        self.assertIn("Falha ao enviar", texto)
 
     def test_servidor_com_erro_nao_derruba_o_programa(self):
-        modulo, texto, _ = rodar_main(["11111111", "22222222"], status_post=503)
-        acessos = modulo.ultimos_acessos.listar()
-        self.assertEqual(len(acessos), 2)
-        self.assertFalse(any(a["enviado"] for a in acessos))
-
-    def test_falha_de_rede_no_post_e_tratada(self):
-        modulo, texto, _ = rodar_main(["11111111"], erro_post=OSError("timeout"))
-        self.assertIn("Falha ao enviar", texto)
-        self.assertEqual(len(modulo.ultimos_acessos.listar()), 1)
-
-    def test_post_com_sucesso_marca_como_enviado(self):
-        modulo, _, _ = rodar_main(["11111111"])
-        self.assertTrue(modulo.ultimos_acessos.listar()[0]["enviado"])
+        modulo, _, _ = rodar_main(["11111111", "22222222"], status_post=503)
+        self.assertEqual(len(modulo.ultimos_acessos.listar()), 2)
 
     def test_mesmo_cartao_seguido_conta_uma_vez_so(self):
-        # 3 leituras seguidas do mesmo cartão em menos de 2 s viram 1 acesso
-        modulo, _, chamadas = rodar_main(["11111111", "11111111", "11111111"])
+        _, _, chamadas = rodar_main(["11111111", "11111111", "11111111"])
         self.assertEqual(len(chamadas), 1)
 
     def test_erro_de_spi_no_leitor_nao_derruba(self):
-        modulo, texto, chamadas = rodar_main(["erro", "11111111"])
+        _, texto, chamadas = rodar_main(["erro", "11111111"])
         self.assertIn("Erro de leitura no RFID", texto)
         self.assertEqual(len(chamadas), 1)
 
     def test_ring_buffer_guarda_so_os_ultimos_20(self):
-        # 25 acessos de cartões diferentes (todos desconhecidos): sobram 20
         uids = ["%08x" % (0x100 + n) for n in range(25)]
         modulo, _, _ = rodar_main(uids)
         acessos = modulo.ultimos_acessos.listar()
@@ -207,6 +225,22 @@ class TestMain(unittest.TestCase):
         self.assertEqual(acessos[0]["uid"], uids[5])
         self.assertEqual(acessos[-1]["uid"], uids[24])
 
+    def test_comando_liberar_acende_verde(self):
+        modulo, texto, _ = rodar_main([None], comandos=["liberar"])
+        self.assertIn("Comando recebido: liberar", texto)
+        self.assertIn(1, modulo.LEDS["estagio"].historico)
+
+    def test_comando_alarme_pisca_as_tres(self):
+        modulo, _, _ = rodar_main([None], comandos=["alarme"])
+        for led in modulo.LEDS.values():
+            self.assertEqual(led.historico.count(1), 6)
+
+    def test_comando_resetar_zera_o_ring_buffer(self):
+        # 1ª volta: busca comando (nenhum) e lê o cartão. 20 voltas depois (2 s) chega o "resetar".
+        roteiro = ["11111111"] + [None] * 25
+        modulo, texto, _ = rodar_main(roteiro, comandos=[None, "resetar"])
+        self.assertIn("Ring Buffer zerado", texto)
+        self.assertEqual(len(modulo.ultimos_acessos), 0)
 
 if __name__ == "__main__":
     unittest.main()

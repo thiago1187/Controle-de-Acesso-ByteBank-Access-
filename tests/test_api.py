@@ -89,6 +89,17 @@ class TestAPI(unittest.TestCase):
             n = con.execute("SELECT COUNT(*) FROM transacoes").fetchone()[0]
         self.assertEqual(n, 0)
 
+    def test_comando_do_dashboard_chega_ao_esp32_uma_vez_so(self):
+        api.comandos_pendentes.clear()
+        r = self.cliente.post("/comandos", json={"comando": "liberar"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(self.cliente.get("/comandos/proximo").get_json()["comando"], "liberar")
+        self.assertIsNone(self.cliente.get("/comandos/proximo").get_json()["comando"])
+
+    def test_comando_invalido_da_400(self):
+        r = self.cliente.post("/comandos", json={"comando": "explodir"})
+        self.assertEqual(r.status_code, 400)
+
     def test_transacao_de_cartao_desconhecido_da_404(self):
         r = self.cliente.post("/transacoes", json={"uid": "zzz", "tipo": "deposito", "valor": 1})
         self.assertEqual(r.status_code, 404)
