@@ -132,7 +132,8 @@ def encerrar_processo(atual):
     with encerramento_lock:
         if atual.poll() is not None:
             return True
-        acoes = (lambda: atual.send_signal(signal.SIGINT), atual.terminate, atual.kill)
+        acoes = ((atual.terminate, atual.kill) if os.name == "nt"
+                  else (lambda: atual.send_signal(signal.SIGINT), atual.terminate, atual.kill))
         for acao in acoes:
             try:
                 acao()

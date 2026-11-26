@@ -271,7 +271,28 @@ def telemetria():
     if acessos.empty:
         st.info("Nenhum acesso ainda. Passe um cartão no leitor.")
     else:
+        ultimo = acessos.iloc[0]
+        horario = pd.to_datetime(ultimo["horario"]).strftime("%d/%m/%Y %H:%M:%S")
+        nome = ultimo["nome"] if pd.notna(ultimo["nome"]) else "Cartão não cadastrado"
+        if ultimo["resultado"] == "liberado":
+            st.success("Acesso liberado: " + nome + " — " + horario)
+        else:
+            st.error("Acesso negado: " + nome + " — " + horario)
+
         acessos["presenca"] = acessos["presenca"].map({1: "sim", 0: "não"})
+        acessos["resultado"] = acessos["resultado"].map({
+            "liberado": "Liberado",
+            "negado": "Negado",
+        })
+        acessos["horario"] = pd.to_datetime(acessos["horario"]).dt.strftime("%d/%m/%Y %H:%M:%S")
+        acessos = acessos.rename(columns={
+            "horario": "Data e hora",
+            "uid": "UID",
+            "nome": "Nome",
+            "categoria": "Categoria",
+            "resultado": "Resultado",
+            "presenca": "Presença",
+        })
         st.dataframe(acessos, hide_index=True, use_container_width=True)
 
 

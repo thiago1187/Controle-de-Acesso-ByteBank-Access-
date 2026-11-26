@@ -13,12 +13,10 @@ Este é o Módulo 6 do projeto da AV2 de Algoritmo e Estrutura de Dados (CESAR S
 
 Uma pessoa encosta o cartão no leitor RFID. O ESP32 manda o UID do cartão para a API. A API procura o cartão em uma Tabela Hash, decide se libera e grava a tentativa no banco. O dashboard mostra a luz da categoria em um semáforo na tela:
 
-| Categoria | Luz | Acesso |
+| Resultado | Luz no ESP32 | Semáforo no painel |
 | --- | --- | --- |
-| VIP | Amarela | Liberado |
-| Estágio | Verde | Liberado |
-| Visita | Vermelha | Liberado |
-| Cartão não cadastrado | As 3 acendem | Negado |
+| Cartão cadastrado | Verde | Cor da categoria (VIP amarela, estágio verde, visita vermelha) |
+| Cartão não cadastrado | As 3 piscam | As 3 acendem |
 
 Na bancada ficam só o ESP32 e o leitor RFID. O semáforo de LEDs e o sensor de presença (PIR) saíram da montagem para diminuir o trabalho físico: a luz de cada acesso aparece no dashboard. O código da placa ainda aciona os pinos dos LEDs e lê o pino do PIR. Sem eles ligados o fluxo é o mesmo, e todo acesso vai com `presenca: false`.
 
@@ -70,15 +68,17 @@ Os nomes são os que estão impressos nas placas. Na montagem atual só o RC522 
 | RC522 GND | GND |
 | RC522 RST | D22 |
 | RC522 3V3 | 3V3 |
-| Semáforo R (vermelho, visita) | D27 |
-| Semáforo Y (amarelo, VIP) | D26 |
-| Semáforo G (verde, estágio) | D25 |
+| Semáforo R (vermelho) | D27 |
+| Semáforo Y (amarelo) | D26 |
+| Semáforo G (verde, acesso liberado) | D25 |
 | Semáforo GND | GND |
 | PIR VCC | VIN (5 V) |
 | PIR OUT | D33 |
 | PIR GND | GND |
 
 O RC522 só aguenta 3,3 V. Nunca ligue ele no VIN.
+
+Todo cartão cadastrado acende a luz verde quando o acesso é liberado; cartões não cadastrados piscam as três luzes. O dashboard destaca o resultado da tentativa mais recente com nome e data/hora.
 
 O PIR é opcional para rodar. Sem ele, o pino D33 fica em 0 e todo acesso vai com `presenca: false`.
 
@@ -155,8 +155,7 @@ estão em `dashboard/requirements.txt`.
 
 **3. Placa**
 
-1. Descubra o IP do computador (`ipconfig` no Windows) e coloque em `URL_API` no `esp32/main.py`, por exemplo `http://192.168.0.10:5000`.
-2. Copie `config_wifi.example.py` com o nome `config_wifi.py` e preencha nome e senha da rede. Esse arquivo não vai para o GitHub.
+1. Copie `config_wifi.example.py` com o nome `config_wifi.py`. Preencha o nome e a senha da rede 2,4 GHz e ajuste `URL_API` com o IP do computador (`ipconfig` no Windows), por exemplo `http://192.168.0.20:5000`. Esse arquivo não vai para o GitHub.
 3. No Thonny, envie para a placa `boot.py`, `config_wifi.py`, `main.py`, `estruturas.py` e `mfrc522.py` ("Salvar como" e depois "Dispositivo MicroPython").
 4. Aperte EN na placa. O terminal mostra:
 

@@ -3,7 +3,7 @@
 # O boot.py já conectou no Wi-Fi. Aqui o ESP32:
 #   1. lê o cartão no leitor RFID (RC522) e manda o UID para a API;
 #   2. a API responde se o acesso foi liberado e qual a categoria da pessoa;
-#   3. acende a luz da categoria (amarelo = VIP, verde = estágio, vermelho = visita);
+#   3. acende verde para qualquer acesso liberado;
 #   4. guarda o acesso no Ring Buffer (últimos 20) e na Tabela Hash local (cache);
 #   5. de 2 em 2 segundos pergunta à API se o dashboard mandou algum comando.
 
@@ -18,15 +18,18 @@ from estruturas import RingBuffer, TabelaCartoes
 PINO_SCK, PINO_MOSI, PINO_MISO, PINO_RST, PINO_SDA = 18, 23, 19, 22, 5
 PINO_PIR = 33
 
-# Cada categoria tem uma luz: amarelo = VIP, verde = estágio, vermelho = visita
+# Verde indica acesso liberado; as três luzes piscam em caso de negação ou alarme.
 LEDS = {
-    "vip": Pin(26, Pin.OUT),      # amarelo
-    "estagio": Pin(25, Pin.OUT),  # verde
-    "visita": Pin(27, Pin.OUT),   # vermelho
+    "vermelho": Pin(27, Pin.OUT),
+    "amarelo": Pin(26, Pin.OUT),
+    "verde": Pin(25, Pin.OUT),
 }
 
-# Endereço da API (api/app.py). Troque pelo IP do computador que roda a API.
-URL_API = "http://192.168.0.10:5000"
+# Endereço da API (api/app.py), definido em config_wifi.py para esta rede.
+try:
+    from config_wifi import URL_API
+except ImportError:
+    URL_API = "http://192.168.0.20:5000"
 
 SEGUNDOS_LUZ = 3                  # tempo que a luz fica acesa
 INTERVALO_MESMO_CARTAO_MS = 2000  # ignora o mesmo cartão lido de novo logo em seguida
@@ -55,8 +58,8 @@ def piscar_todas(vezes=3):
         time.sleep_ms(200)
 
 
-def acender(categoria):
-    LEDS[categoria].value(1)
+def acender_verde():
+    LEDS["verde"].value(1)
     time.sleep(SEGUNDOS_LUZ)
     apagar_luzes()
 
@@ -107,7 +110,7 @@ def tratar_cartao(uid, presenca):
 
     if resultado == "liberado":
         print("Acesso liberado | categoria:", categoria, "| decidido:", origem)
-        acender(categoria)
+        acender_verde()
     else:
         print("Acesso negado, UID:", uid, "| decidido:", origem)
         piscar_todas()
@@ -127,7 +130,7 @@ def executar_comando(comando):
     """Comandos que vêm do dashboard."""
     print("Comando recebido:", comando)
     if comando == "liberar":
-        acender("estagio")          # luz verde: trava liberada pelo dashboard
+        acender_verde()
     elif comando == "alarme":
         piscar_todas(vezes=6)
     elif comando == "resetar":

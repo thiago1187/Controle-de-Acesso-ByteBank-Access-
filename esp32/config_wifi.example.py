@@ -7,5 +7,6 @@
 #
 # O config_wifi.py está no .gitignore. Nunca envie a senha real para o GitHub.
 
-WIFI_SSID = "NOME_DA_REDE"
-WIFI_SENHA = "SENHA_DA_REDE"
+WIFI_SSID = "SEU_WIFI_2G"
+WIFI_SENHA = "SUA_SENHA"
+URL_API = "http://IP_DO_COMPUTADOR:5000"

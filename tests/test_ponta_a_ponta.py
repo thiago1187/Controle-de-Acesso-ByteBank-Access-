@@ -59,7 +59,7 @@ class TestPontaAPonta(unittest.TestCase):
         tela = self.abrir_dashboard()
         self.assertFalse(tela.exception, tela.exception)
         tabela = tela.dataframe[0].value
-        self.assertEqual(list(tabela["uid"]), ["deadbeef", "01020304"])
+        self.assertEqual(list(tabela["UID"]), ["deadbeef", "01020304"])
         metricas = {m.label: m.value for m in tela.metric}
         self.assertEqual(metricas["Liberados"], "1")
         self.assertEqual(metricas["Negados"], "1")

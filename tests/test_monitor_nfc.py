@@ -3,6 +3,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import os
 import signal
 import subprocess
 import sys
@@ -173,7 +174,8 @@ class TestSupervisaoMonitor(unittest.TestCase):
                               "print('pronto',flush=True)\ntime.sleep(60)")
         self.assertEqual(processo.stdout.readline().strip(), "pronto")
         self.assertTrue(self.modulo.encerrar_processo(processo))
-        self.assertEqual(processo.returncode, -signal.SIGTERM)
+        codigo_esperado = 1 if os.name == "nt" else -signal.SIGTERM
+        self.assertEqual(processo.returncode, codigo_esperado)
 
 
 if __name__ == "__main__":

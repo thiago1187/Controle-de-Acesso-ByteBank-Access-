@@ -153,16 +153,16 @@ def rodar_main(roteiro, wifi=True, status_post=201, erro_post=None, pir=0, coman
 
 
 class TestMain(unittest.TestCase):
-    def test_cada_categoria_acende_a_luz_certa(self):
-        casos = [("11111111", "vip", 26), ("22222222", "estagio", 25), ("33333333", "visita", 27)]
-        for uid, categoria, pino in casos:
+    def test_toda_categoria_liberada_acende_verde(self):
+        casos = [("11111111", "vip"), ("22222222", "estagio"), ("33333333", "visita")]
+        for uid, categoria in casos:
             with self.subTest(categoria=categoria):
                 modulo, texto, _ = rodar_main([uid])
-                self.assertEqual(modulo.LEDS[categoria].numero, pino)
-                self.assertIn(1, modulo.LEDS[categoria].historico)
-                self.assertEqual(modulo.LEDS[categoria].valor, 0)
-                for outra, led in modulo.LEDS.items():
-                    if outra != categoria:
+                self.assertEqual(modulo.LEDS["verde"].numero, 25)
+                self.assertIn(1, modulo.LEDS["verde"].historico)
+                self.assertEqual(modulo.LEDS["verde"].valor, 0)
+                for cor, led in modulo.LEDS.items():
+                    if cor != "verde":
                         self.assertNotIn(1, led.historico)
                 self.assertIn("Acesso liberado", texto)
 
@@ -237,7 +237,7 @@ class TestMain(unittest.TestCase):
     def test_comando_liberar_acende_verde(self):
         modulo, texto, _ = rodar_main([None], comandos=["liberar"])
         self.assertIn("Comando recebido: liberar", texto)
-        self.assertIn(1, modulo.LEDS["estagio"].historico)
+        self.assertIn(1, modulo.LEDS["verde"].historico)
 
     def test_comando_alarme_pisca_as_tres(self):
         modulo, _, _ = rodar_main([None], comandos=["alarme"])
