@@ -10,18 +10,22 @@ Este é o Módulo 6 do projeto da AV2 de Algoritmo e Estrutura de Dados (CESAR S
 
 ## O que o projeto faz
 
-Uma pessoa encosta o cartão no leitor RFID. O ESP32 manda o UID do cartão para a API. A API procura o cartão em uma Tabela Hash, decide se libera e grava a tentativa no banco. A placa acende a luz da categoria:
+Uma pessoa encosta o cartão no leitor RFID. O ESP32 manda o UID do cartão para a API. A API procura o cartão em uma Tabela Hash, decide se libera e grava a tentativa no banco. O dashboard mostra a luz da categoria em um semáforo na tela:
 
 | Categoria | Luz | Acesso |
 | --- | --- | --- |
 | VIP | Amarela | Liberado |
 | Estágio | Verde | Liberado |
 | Visita | Vermelha | Liberado |
-| Cartão não cadastrado | As 3 piscam | Negado |
+| Cartão não cadastrado | As 3 acendem | Negado |
 
-O sensor de presença (PIR) avisa se tem alguém perto da porta e entra no registro de cada acesso. No lugar do módulo relé da especificação usamos o semáforo de LEDs: "liberar trava" acende a luz verde.
+Na bancada ficam só o ESP32 e o leitor RFID. O semáforo de LEDs e o sensor de presença (PIR) saíram da montagem para diminuir o trabalho físico: a luz de cada acesso aparece no dashboard. O código da placa ainda aciona os pinos dos LEDs e lê o pino do PIR. Sem eles ligados o fluxo é o mesmo, e todo acesso vai com `presenca: false`.
 
-O dashboard em Streamlit mostra os acessos em tempo real e manda comandos para a placa.
+O dashboard em Streamlit mostra o semáforo e os acessos em tempo real e manda comandos para a placa. "Liberar trava" acende a luz verde na tela e "acionar alarme" acende as 3.
+
+### Painel na nuvem
+
+O painel também está publicado em https://bytebank-access.streamlit.app, em modo demonstração: na nuvem não tem a API em outro processo nem a placa, então a API roda dentro do painel e uma placa simulada (botões "Cartão VIP", "Cartão sem cadastro" etc.) faz o papel do ESP32. O arquivo de entrada é `dashboard/painel_nuvem.py`. Esse painel não enxerga o hardware da bancada.
 
 ## Arquitetura
 
@@ -53,7 +57,7 @@ dashboard --POST /comandos--> API --GET /comandos/proximo--> ESP32 (a cada 2 s)
 
 ### Ligações
 
-Os nomes são os que estão impressos nas placas.
+Os nomes são os que estão impressos nas placas. Na montagem atual só o RC522 fica ligado; as linhas do semáforo e do PIR são opcionais.
 
 | De | Para (ESP32) |
 | --- | --- |
@@ -219,6 +223,7 @@ python -m unittest discover tests -v
 | `test_mfrc522.py` | Inicialização SPI e reset, CRC, seleção de tags e UIDs completos de 4, 7 e 10 bytes |
 | `test_monitor_nfc.py` | Telemetria USB, perda de atualizações e recuperação sem processos concorrentes na mesma serial |
 | `test_api.py` | Rotas da API, saque sem saldo não grava nada, comando chega uma vez só |
+| `test_painel_demo.py` | Painel em modo demonstração: placa simulada gera acessos, o semáforo da tela mostra a luz certa e o comando chega |
 | `test_ponta_a_ponta.py` | Fluxo completo: sobe a API, faz o papel do ESP32, abre o dashboard, clica em "Liberar trava" e confere que o comando chega na placa. Também manda 30 acessos seguidos sem travar |
 
 Os testes da placa usam módulos de mentira (`machine`, `network`, `urequests` e o leitor). Eles conferem a lógica, mas não substituem o teste na bancada.

@@ -59,10 +59,12 @@ class TestPainelDemo(unittest.TestCase):
         tela = self.clicar(tela, "Cartão VIP")
         self.assertFalse(tela.exception, tela.exception)
         self.assertIn("luz amarela", tela.success[0].value)
+        self.assertTrue(any("Luz amarela" in c.value for c in tela.caption), "semáforo deveria mostrar a luz amarela")
 
         # Cartão sem cadastro: negado
         tela = self.clicar(tela, "Cartão sem cadastro")
         self.assertIn("Acesso negado", tela.error[0].value)
+        self.assertTrue(any("negado. As 3 luzes" in c.value for c in tela.caption), "semáforo deveria acender as 3 luzes")
 
         # Os dois acessos aparecem na tabela, o mais novo primeiro
         tabela = tela.dataframe[0].value
@@ -75,6 +77,7 @@ class TestPainelDemo(unittest.TestCase):
         tela = self.clicar(tela, "Liberar trava")
         self.assertIn("recebeu 'liberar'", tela.success[0].value)
         self.assertEqual(api.comandos_pendentes, [])
+        self.assertTrue(any("Trava liberada" in c.value for c in tela.caption), "semáforo deveria mostrar a trava liberada")
 
 
 if __name__ == "__main__":

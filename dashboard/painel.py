@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 
 import pandas as pd
 import requests
@@ -90,12 +91,36 @@ CARTOES_DEMO = [
     ("Cartão de visita", "55667788"),
     ("Cartão sem cadastro", "deadbeef"),
 ]
-LUZES = {"vip": "amarela", "estagio": "verde", "visita": "vermelha"}
 ACOES_DA_PLACA = {
-    "liberar": "acende a luz verde por 3 s",
-    "alarme": "pisca as 3 luzes 6 vezes",
+    "liberar": "trava liberada, luz verde no painel",
+    "alarme": "alarme acionado, as 3 luzes no painel",
     "resetar": "zera o Ring Buffer",
 }
+
+# ---------- semáforo na tela (no lugar dos LEDs da bancada) ----------
+LUZES = {"vip": "amarela", "estagio": "verde", "visita": "vermelha"}
+ORDEM_DAS_LUZES = ("vermelha", "amarela", "verde")
+CORES = {"vermelha": "#C8321F", "amarela": "#F2B705", "verde": "#2DB56A"}
+COR_APAGADA = "#D5D8DC"
+SEGUNDOS_DO_EFEITO = 4   # quanto tempo "liberar" e "alarme" ficam no semáforo
+
+
+def luzes_do_acesso(resultado, categoria):
+    """Luzes que acendem para um acesso: a da categoria, ou as 3 se foi negado."""
+    if resultado == "negado":
+        return list(ORDEM_DAS_LUZES)
+    return [LUZES[categoria]]
+
+
+def desenhar_semaforo(acesas, legenda):
+    """Desenha as 3 luzes (acesas ou apagadas) e escreve embaixo o que elas dizem."""
+    bolas = "".join(
+        '<span style="display:inline-block;width:56px;height:56px;border-radius:50%;'
+        'margin-right:12px;background:' + (CORES[cor] if cor in acesas else COR_APAGADA) + '"></span>'
+        for cor in ORDEM_DAS_LUZES
+    )
+    st.markdown(bolas, unsafe_allow_html=True)
+    st.caption(legenda)
 
 if MODO_DEMO:
     api_interna()
@@ -110,10 +135,10 @@ if MODO_DEMO:
             if acesso["resultado"] == "liberado":
                 st.success(
                     "Acesso liberado para " + acesso["nome"] + " (" + acesso["categoria"]
-                    + "). A placa acende a luz " + LUZES[acesso["categoria"]] + "."
+                    + "). Acende a luz " + LUZES[acesso["categoria"]] + " no semáforo."
                 )
             else:
-                st.error("Acesso negado: cartão " + acesso["uid"] + " sem cadastro. As 3 luzes piscam.")
+                st.error("Acesso negado: cartão " + acesso["uid"] + " sem cadastro. Acendem as 3 luzes.")
 
 # ---------- comandos para o ESP32 ----------
 st.subheader("Comandos para a placa")
@@ -125,7 +150,11 @@ botoes = [
 ]
 for coluna, texto, comando in botoes:
     if coluna.button(texto, use_container_width=True):
-        if not enviar_comando(comando):
+        enviado = enviar_comando(comando)
+        if enviado and comando in ("liberar", "alarme"):
+            # O semáforo da tela mostra o comando por alguns segundos
+            st.session_state["efeito"] = (comando, time.time() + SEGUNDOS_DO_EFEITO)
+        if not enviado:
             st.error("Não consegui falar com a API em " + URL_API)
         elif MODO_DEMO:
             recebido = placa_simulada_busca_comando()
@@ -144,6 +173,25 @@ def telemetria():
         return
 
     acessos = ler_acessos()
+
+    # Semáforo: mostra o comando recém-enviado ou, sem comando, o último acesso
+    efeito = st.session_state.get("efeito")
+    if efeito and time.time() < efeito[1] and efeito[0] == "liberar":
+        desenhar_semaforo(["verde"], "Trava liberada pelo painel. Luz verde.")
+    elif efeito and time.time() < efeito[1] and efeito[0] == "alarme":
+        desenhar_semaforo(list(ORDEM_DAS_LUZES), "Alarme acionado pelo painel. As 3 luzes.")
+    elif acessos.empty:
+        desenhar_semaforo([], "Nenhuma luz acesa: ainda não houve acesso.")
+    else:
+        ultimo = acessos.iloc[0]
+        acesas = luzes_do_acesso(ultimo["resultado"], ultimo["categoria"])
+        if ultimo["resultado"] == "liberado":
+            legenda = ("Último acesso: " + ultimo["nome"] + " (" + ultimo["categoria"]
+                       + "), liberado. Luz " + acesas[0] + ".")
+        else:
+            legenda = "Último acesso: cartão " + ultimo["uid"] + " sem cadastro, negado. As 3 luzes."
+        desenhar_semaforo(acesas, legenda)
+
     liberados = int((acessos["resultado"] == "liberado").sum())
     negados = int((acessos["resultado"] == "negado").sum())
 
