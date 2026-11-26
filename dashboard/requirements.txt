@@ -1,5 +1,6 @@
-streamlit>=1.37
+streamlit>=1.37,<1.68
 pandas
 requests
+flask>=3.0
 mpremote
 pyserial

@@ -4,16 +4,26 @@ Lê os acessos direto do banco SQLite da API e mostra na tela, atualizando a
 cada 2 segundos. Os botões mandam comandos para o ESP32 pela API.
 
 Rodar (com a API já rodando):  streamlit run painel.py
+
+Modo demonstração (BYTEBANK_DEMO=1, usado pelo painel_nuvem.py): o painel roda
+sozinho, sem a API em outro processo e sem a placa. A API é carregada aqui
+dentro e uma placa simulada faz o papel do ESP32.
 """
 
 import os
 import sqlite3
+import sys
+import tempfile
 
 import pandas as pd
 import requests
 import streamlit as st
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
+MODO_DEMO = os.environ.get("BYTEBANK_DEMO") == "1"
+if MODO_DEMO:
+    # Na nuvem não existe api/bytebank.db: o banco da demonstração fica em uma pasta temporária.
+    os.environ.setdefault("BYTEBANK_DB", os.path.join(tempfile.gettempdir(), "bytebank-demo.db"))
 CAMINHO_BANCO = os.environ.get("BYTEBANK_DB", os.path.join(PASTA, "..", "api", "bytebank.db"))
 URL_API = os.environ.get("BYTEBANK_API", "http://localhost:5000")
 
@@ -34,8 +44,34 @@ def ler_acessos(limite=20):
         con.close()
 
 
+@st.cache_resource
+def api_interna():
+    """Modo demonstração: carrega a API dentro do dashboard e cria o banco."""
+    sys.path.insert(0, os.path.join(PASTA, "..", "api"))
+    import app as api
+    api.iniciar_banco()
+    return api
+
+
+def cliente_interno():
+    """Cliente que chama as rotas da API sem passar pela rede (modo demonstração)."""
+    return api_interna().app.test_client()
+
+
+def simular_cartao(uid):
+    """Faz o papel do ESP32: manda o UID para POST /acessos e devolve a resposta."""
+    return cliente_interno().post("/acessos", json={"uid": uid, "presenca": True}).get_json()
+
+
+def placa_simulada_busca_comando():
+    """Faz o papel do ESP32: busca o próximo comando da fila."""
+    return cliente_interno().get("/comandos/proximo").get_json()["comando"]
+
+
 def enviar_comando(comando):
     """Coloca o comando na fila da API. O ESP32 busca em até 2 segundos."""
+    if MODO_DEMO:
+        return cliente_interno().post("/comandos", json={"comando": comando}).status_code == 201
     try:
         resposta = requests.post(URL_API + "/comandos", json={"comando": comando}, timeout=3)
         return resposta.status_code == 201
@@ -47,6 +83,38 @@ st.set_page_config(page_title="ByteBank Access", page_icon="🔐")
 st.title("ByteBank Access")
 st.caption("Controle de acesso à área VIP e ao cofre")
 
+# ---------- placa simulada (só no modo demonstração) ----------
+CARTOES_DEMO = [
+    ("Cartão VIP", "01020304"),
+    ("Cartão de estágio", "11223344"),
+    ("Cartão de visita", "55667788"),
+    ("Cartão sem cadastro", "deadbeef"),
+]
+LUZES = {"vip": "amarela", "estagio": "verde", "visita": "vermelha"}
+ACOES_DA_PLACA = {
+    "liberar": "acende a luz verde por 3 s",
+    "alarme": "pisca as 3 luzes 6 vezes",
+    "resetar": "zera o Ring Buffer",
+}
+
+if MODO_DEMO:
+    api_interna()
+    st.info(
+        "Modo demonstração: este painel roda na nuvem com uma placa simulada. "
+        "Os acessos são gerados pelos botões abaixo, não pelo hardware da bancada."
+    )
+    st.subheader("Placa simulada: encoste um cartão")
+    for coluna, (texto, uid) in zip(st.columns(len(CARTOES_DEMO)), CARTOES_DEMO):
+        if coluna.button(texto, use_container_width=True):
+            acesso = simular_cartao(uid)
+            if acesso["resultado"] == "liberado":
+                st.success(
+                    "Acesso liberado para " + acesso["nome"] + " (" + acesso["categoria"]
+                    + "). A placa acende a luz " + LUZES[acesso["categoria"]] + "."
+                )
+            else:
+                st.error("Acesso negado: cartão " + acesso["uid"] + " sem cadastro. As 3 luzes piscam.")
+
 # ---------- comandos para o ESP32 ----------
 st.subheader("Comandos para a placa")
 col1, col2, col3 = st.columns(3)
@@ -57,10 +125,14 @@ botoes = [
 ]
 for coluna, texto, comando in botoes:
     if coluna.button(texto, use_container_width=True):
-        if enviar_comando(comando):
-            st.success("Comando '" + comando + "' enviado. A placa executa em até 2 s.")
-        else:
+        if not enviar_comando(comando):
             st.error("Não consegui falar com a API em " + URL_API)
+        elif MODO_DEMO:
+            recebido = placa_simulada_busca_comando()
+            if recebido:
+                st.success("A placa simulada recebeu '" + recebido + "': " + ACOES_DA_PLACA[recebido] + ".")
+        else:
+            st.success("Comando '" + comando + "' enviado. A placa executa em até 2 s.")
 
 
 # ---------- telemetria (atualiza sozinha) ----------
