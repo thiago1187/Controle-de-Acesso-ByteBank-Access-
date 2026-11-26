@@ -1,8 +1,8 @@
 """Teste do painel em modo demonstração (o que roda no Streamlit Community Cloud).
 
 Abre o painel_nuvem.py sem API em outro processo e sem placa, clica nos botões
-da placa simulada e confere que os acessos aparecem na tabela e que o comando
-chega na placa simulada.
+da placa simulada e confere que os acessos aparecem na tabela, que um cartão novo
+pode ser cadastrado pelo painel e que o comando chega na placa simulada.
 """
 
 import os
@@ -50,7 +50,7 @@ class TestPainelDemo(unittest.TestCase):
         botao = [b for b in tela.button if b.label == texto][0]
         return botao.click().run()
 
-    def test_placa_simulada_gera_acessos_e_recebe_comando(self):
+    def test_placa_simulada_acessos_cadastro_e_comando(self):
         tela = self.abrir_painel()
         self.assertFalse(tela.exception, tela.exception)
         self.assertIn("Modo demonstração", tela.info[0].value)
@@ -61,21 +61,35 @@ class TestPainelDemo(unittest.TestCase):
         self.assertIn("luz amarela", tela.success[0].value)
         self.assertTrue(any("Luz amarela" in c.value for c in tela.caption), "semáforo deveria mostrar a luz amarela")
 
-        # Cartão sem cadastro: negado
-        tela = self.clicar(tela, "Cartão sem cadastro")
+        # Cartão novo: negado, e o painel oferece o cadastro
+        tela = self.clicar(tela, "Cartão novo")
         self.assertIn("Acesso negado", tela.error[0].value)
         self.assertTrue(any("negado. As 3 luzes" in c.value for c in tela.caption), "semáforo deveria acender as 3 luzes")
-
-        # Os dois acessos aparecem na tabela, o mais novo primeiro
         tabela = tela.dataframe[0].value
-        self.assertEqual(list(tabela["uid"]), ["deadbeef", "01020304"])
+        uid_novo = tabela["uid"][0]
+        self.assertEqual(list(tabela["uid"]), [uid_novo, "01020304"])
         metricas = {m.label: m.value for m in tela.metric}
         self.assertEqual(metricas["Liberados"], "1")
         self.assertEqual(metricas["Negados"], "1")
+        self.assertIn(uid_novo, tela.warning[0].value)
+
+        # A pessoa escolhe o que o cartão será e cadastra
+        tela.selectbox[0].select("Estágio")
+        tela.text_input[0].input("Maria")
+        tela = self.clicar(tela, "Cadastrar cartão")
+        self.assertFalse(tela.exception, tela.exception)
+        self.assertEqual(api.cartoes[uid_novo]["categoria"], "estagio")
+        self.assertEqual(api.cartoes[uid_novo]["nome"], "Maria")
+        self.assertFalse(tela.warning, "depois do cadastro o pedido de cadastro some")
+
+        # Na próxima vez o mesmo cartão entra como foi definido
+        tela = self.clicar(tela, "Cartão novo")
+        self.assertTrue(any("Acesso liberado para Maria" in a.value for a in tela.success))
+        self.assertTrue(any("Maria (estagio), liberado. Luz verde" in c.value for c in tela.caption))
 
         # Comando do painel chega na placa simulada e sai da fila
         tela = self.clicar(tela, "Liberar trava")
-        self.assertIn("recebeu 'liberar'", tela.success[0].value)
+        self.assertTrue(any("recebeu 'liberar'" in a.value for a in tela.success))
         self.assertEqual(api.comandos_pendentes, [])
         self.assertTrue(any("Trava liberada" in c.value for c in tela.caption), "semáforo deveria mostrar a trava liberada")
 

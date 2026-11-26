@@ -169,7 +169,9 @@ Ring Buffer: 1 de 20 acessos guardados
 
 ### Cadastrar um cartão
 
-Encoste o cartão. Se ele não estiver cadastrado, o terminal mostra `Acesso negado, UID: a1b2c3d4` e o dashboard mostra o UID na tabela. Cadastre na API:
+Encoste o cartão. Se ele não estiver cadastrado, o terminal mostra `Acesso negado, UID: a1b2c3d4` e o dashboard mostra o pedido "Cartão novo: cadastrar". Escolha no painel o que o cartão será (VIP, Estágio ou Visita), escreva o nome se quiser e clique em "Cadastrar cartão". Na próxima vez o cartão entra com a luz da categoria escolhida.
+
+Também dá para cadastrar direto na API:
 
 ```
 curl -X POST http://localhost:5000/usuarios -H "Content-Type: application/json" -d "{\"uid\": \"a1b2c3d4\", \"nome\": \"Thiago\", \"categoria\": \"vip\"}"
@@ -223,7 +225,7 @@ python -m unittest discover tests -v
 | `test_mfrc522.py` | Inicialização SPI e reset, CRC, seleção de tags e UIDs completos de 4, 7 e 10 bytes |
 | `test_monitor_nfc.py` | Telemetria USB, perda de atualizações e recuperação sem processos concorrentes na mesma serial |
 | `test_api.py` | Rotas da API, saque sem saldo não grava nada, comando chega uma vez só |
-| `test_painel_demo.py` | Painel em modo demonstração: placa simulada gera acessos, o semáforo da tela mostra a luz certa e o comando chega |
+| `test_painel_demo.py` | Painel em modo demonstração: placa simulada gera acessos, o semáforo da tela mostra a luz certa, um cartão novo é cadastrado pelo painel e o comando chega |
 | `test_ponta_a_ponta.py` | Fluxo completo: sobe a API, faz o papel do ESP32, abre o dashboard, clica em "Liberar trava" e confere que o comando chega na placa. Também manda 30 acessos seguidos sem travar |
 
 Os testes da placa usam módulos de mentira (`machine`, `network`, `urequests` e o leitor). Eles conferem a lógica, mas não substituem o teste na bancada.

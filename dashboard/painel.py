@@ -11,6 +11,7 @@ dentro e uma placa simulada faz o papel do ESP32.
 """
 
 import os
+import secrets
 import sqlite3
 import sys
 import tempfile
@@ -80,6 +81,31 @@ def enviar_comando(comando):
         return False
 
 
+def cartao_sem_cadastro():
+    """UID do último cartão lido, se ele ainda não tem cadastro. Senão, None."""
+    con = sqlite3.connect(CAMINHO_BANCO)
+    try:
+        linha = con.execute(
+            "SELECT l.uid FROM audit_access_logs l "
+            "WHERE l.id = (SELECT MAX(id) FROM audit_access_logs) AND l.resultado = 'negado' "
+            "AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.uid = l.uid)"
+        ).fetchone()
+    finally:
+        con.close()
+    return linha[0] if linha else None
+
+
+def cadastrar_cartao(uid, nome, categoria):
+    """Cadastra o cartão pela API (POST /usuarios). Devolve True se deu certo."""
+    dados = {"uid": uid, "nome": nome, "categoria": categoria}
+    if MODO_DEMO:
+        return cliente_interno().post("/usuarios", json=dados).status_code == 201
+    try:
+        return requests.post(URL_API + "/usuarios", json=dados, timeout=3).status_code == 201
+    except requests.RequestException:
+        return False
+
+
 st.set_page_config(page_title="ByteBank Access", page_icon="🔐")
 st.title("ByteBank Access")
 st.caption("Controle de acesso à área VIP e ao cofre")
@@ -89,8 +115,10 @@ CARTOES_DEMO = [
     ("Cartão VIP", "01020304"),
     ("Cartão de estágio", "11223344"),
     ("Cartão de visita", "55667788"),
-    ("Cartão sem cadastro", "deadbeef"),
 ]
+ROTULO_CARTAO_NOVO = "Cartão novo"
+CATEGORIAS = {"VIP": "vip", "Estágio": "estagio", "Visita": "visita"}
+SEGUNDOS_DO_AVISO = 8    # quanto tempo o aviso de "cartão cadastrado" fica na tela
 ACOES_DA_PLACA = {
     "liberar": "trava liberada, luz verde no painel",
     "alarme": "alarme acionado, as 3 luzes no painel",
@@ -129,7 +157,10 @@ if MODO_DEMO:
         "Os acessos são gerados pelos botões abaixo, não pelo hardware da bancada."
     )
     st.subheader("Placa simulada: encoste um cartão")
-    for coluna, (texto, uid) in zip(st.columns(len(CARTOES_DEMO)), CARTOES_DEMO):
+    # Cada pessoa que abre o painel ganha um cartão novo só dela, ainda sem cadastro
+    st.session_state.setdefault("cartao_novo", secrets.token_hex(4))
+    cartoes_da_tela = CARTOES_DEMO + [(ROTULO_CARTAO_NOVO, st.session_state["cartao_novo"])]
+    for coluna, (texto, uid) in zip(st.columns(len(cartoes_da_tela)), cartoes_da_tela):
         if coluna.button(texto, use_container_width=True):
             acesso = simular_cartao(uid)
             if acesso["resultado"] == "liberado":
@@ -138,7 +169,44 @@ if MODO_DEMO:
                     + "). Acende a luz " + LUZES[acesso["categoria"]] + " no semáforo."
                 )
             else:
-                st.error("Acesso negado: cartão " + acesso["uid"] + " sem cadastro. Acendem as 3 luzes.")
+                st.error(
+                    "Acesso negado: cartão " + acesso["uid"] + " sem cadastro. "
+                    "Acendem as 3 luzes. Cadastre o cartão abaixo."
+                )
+
+
+# ---------- cadastro do cartão novo (aparece quando o último cartão lido não tem cadastro) ----------
+@st.fragment(run_every=2)
+def cadastro():
+    aviso = st.session_state.get("aviso_cadastro")   # (texto, até quando)
+    if aviso and time.time() < aviso[1]:
+        st.success(aviso[0])
+    if not os.path.exists(CAMINHO_BANCO):
+        return
+    uid = cartao_sem_cadastro()
+    if uid is None:
+        return
+
+    st.subheader("Cartão novo: cadastrar")
+    st.warning("O cartão " + uid + " ainda não tem cadastro. Escolha o que ele será.")
+    with st.form("cadastro_" + uid):
+        rotulo = st.selectbox("Categoria", list(CATEGORIAS))
+        nome = st.text_input("Nome (opcional)")
+        enviar = st.form_submit_button("Cadastrar cartão")
+    if enviar:
+        categoria = CATEGORIAS[rotulo]
+        if cadastrar_cartao(uid, nome.strip() or "Cartão " + uid, categoria):
+            st.session_state["aviso_cadastro"] = (
+                "Cartão " + uid + " cadastrado como " + rotulo + ". Na próxima vez ele entra com a luz "
+                + LUZES[categoria] + ".",
+                time.time() + SEGUNDOS_DO_AVISO,
+            )
+            st.rerun()   # redesenha a tela: o pedido de cadastro some e o aviso aparece
+        else:
+            st.error("Não consegui cadastrar o cartão. A API está no ar?")
+
+
+cadastro()
 
 # ---------- comandos para o ESP32 ----------
 st.subheader("Comandos para a placa")
