@@ -7,6 +7,7 @@ Este é o Módulo 6 do projeto da AV2 de Algoritmo e Estrutura de Dados (CESAR S
 
 - Thiago Alves
 - José Bruno
+- Gibson Rocha
 
 ## O que o projeto faz
 
