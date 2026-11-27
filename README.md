@@ -91,7 +91,7 @@ esp32/
   boot.py                  conecta o ESP32 ao Wi-Fi
   main.py                  lê o cartão, fala com a API, acende a luz e executa comandos
   estruturas.py            Tabela Hash e Ring Buffer
-  mfrc522.py               biblioteca do leitor RC522 (ver Créditos)
+  mfrc522.py               biblioteca do leitor RC522, com a correção de leitura (ver Créditos)
   LICENSE_mfrc522.txt      licença da biblioteca
   config_wifi.example.py   modelo para o arquivo com a senha do Wi-Fi
 api/
@@ -100,6 +100,9 @@ api/
   requirements.txt
 dashboard/
   painel.py                dashboard em Streamlit
+  painel_nuvem.py          o mesmo painel em modo demonstração (Streamlit Cloud)
+  ponte_usb.py             leva as leituras da placa para a API pelo cabo USB
+  monitor_nfc.py           monitor de bancada do leitor pela USB
   requirements.txt
 docs/                      diagrama e fotos
 tests/                     testes (rodam no computador)
@@ -155,9 +158,9 @@ estão em `dashboard/requirements.txt`.
 
 **3. Placa**
 
-1. Copie `config_wifi.example.py` com o nome `config_wifi.py`. Preencha o nome e a senha da rede 2,4 GHz e ajuste `URL_API` com o IP do computador (`ipconfig` no Windows), por exemplo `http://192.168.0.20:5000`. Esse arquivo não vai para o GitHub.
-3. No Thonny, envie para a placa `boot.py`, `config_wifi.py`, `main.py`, `estruturas.py` e `mfrc522.py` ("Salvar como" e depois "Dispositivo MicroPython").
-4. Aperte EN na placa. O terminal mostra:
+1. Copie `config_wifi.example.py` com o nome `config_wifi.py`. Preencha o nome e a senha da rede 2,4 GHz e troque `IP_DO_COMPUTADOR` em `URL_API` pelo IP do computador que roda a API, por exemplo `http://192.168.0.20:5000`. Esse arquivo não vai para o GitHub.
+2. No Thonny, envie para a placa `boot.py`, `config_wifi.py`, `main.py`, `estruturas.py` e `mfrc522.py` ("Salvar como" e depois "Dispositivo MicroPython").
+3. Aperte EN na placa. O terminal mostra:
 
 ```
 Wi-Fi conectado! IP: 192.168.0.50
@@ -166,6 +169,46 @@ Servidor respondeu: 201
 Acesso liberado | categoria: vip | decidido: api
 Ring Buffer: 1 de 20 acessos guardados
 ```
+
+### Configurar o endereço da API
+
+A placa manda cada leitura para o endereço em `URL_API`, no `config_wifi.py`. Ele precisa ser o IP do computador na mesma rede da placa, com a porta da API (5000):
+
+- **IP no Mac:** `ipconfig getifaddr en0` no Terminal.
+- **IP no Windows:** `ipconfig`, linha "Endereço IPv4".
+- **Teste:** no navegador do celular, na mesma rede, abra `http://IP_DO_COMPUTADOR:5000/`. Se aparecer `{"api": "ByteBank Access", ...}`, a placa também vai alcançar a API.
+
+Cuidados:
+
+- **Porta 5000 no Mac:** o macOS usa essa porta para o Receptor AirPlay. Desligue em Ajustes do Sistema > Geral > AirDrop e Handoff > Receptor AirPlay, ou a API não sobe.
+- **Mudou de rede:** se o computador trocar de Wi-Fi, o IP muda. Atualize `URL_API` e envie o `config_wifi.py` de novo.
+- **Rede que bloqueia aparelhos:** algumas redes de faculdade não deixam um aparelho falar com outro. Se a placa conecta no Wi-Fi mas a API nunca recebe nada, use a ponte USB abaixo.
+
+### Sem Wi-Fi: ponte USB
+
+Foi o caminho usado na demonstração da bancada. A placa fica ligada no computador pelo cabo USB e a ponte leva cada leitura do RC522 para a API. Não depende da rede nem do `URL_API`.
+
+Com a API e o dashboard rodando, na raiz do projeto:
+
+```sh
+.venv/bin/python dashboard/ponte_usb.py
+```
+
+O terminal mostra:
+
+```
+Preparando a placa em /dev/cu.usbserial-0001 (pode levar até 1 minuto)...
+Ponte pronta. Aproxime um cartão.
+21:20:34 89ea6e7a -> negado | cartão sem cadastro, cadastre pelo dashboard
+21:23:59 329cfa00 -> liberado | jose (estagio)
+```
+
+Cada linha é uma leitura real que já está no banco e aparece no dashboard em até 2 segundos.
+
+- **O que ela faz na placa:** interrompe o `main.py` e roda na memória da placa um laço que só lê o cartão. Nada é gravado; ao reiniciar a placa, o `main.py` volta.
+- **O que precisa estar na placa:** MicroPython e o `mfrc522.py` deste repositório (a versão com a correção de leitura).
+- **Porta e API:** por padrão usa `/dev/cu.usbserial-0001` e `http://localhost:5000`. Para mudar, use as variáveis `BYTEBANK_ESP32_PORT` (no Windows, algo como `COM3`) e `BYTEBANK_API`.
+- **Limite:** enquanto a ponte roda, os botões de comando do dashboard não chegam na placa, porque o `main.py` está pausado. Feche o Thonny e outros programas que usem a porta USB antes de iniciar.
 
 ### Cadastrar um cartão
 
@@ -242,7 +285,7 @@ Foto de 05/11, durante a montagem. Nessa data o leitor ainda não respondia na b
 
 ## Créditos
 
-A leitura do RC522 usa a biblioteca `micropython-mfrc522` de Stefan Wendler (licença MIT, em `esp32/LICENSE_mfrc522.txt`). Fizemos três ajustes: suporte à placa ESP32, a condição de espera do `_tocard` (a original usava `~` em booleanos e saía do laço cedo demais) e a leitura da FIFO em uma transação só.
+A leitura do RC522 usa a biblioteca `micropython-mfrc522` de Stefan Wendler (licença MIT, em `esp32/LICENSE_mfrc522.txt`). Fizemos quatro ajustes: suporte à placa ESP32, a condição de espera do `_tocard` (a original usava `~` em booleanos e saía do laço cedo demais), a leitura da FIFO em uma transação só e a escrita nos registradores. A original montava cada byte com `b'%c' % valor`, que no MicroPython vira dois bytes para valores acima de 0x7F. O comando de anticolisão (0x93) chegava errado ao leitor e o UID nunca era lido na bancada. Os testes rodam no computador, onde o Python gera um byte só, por isso não pegavam o problema.
 
 ## Andamento
 

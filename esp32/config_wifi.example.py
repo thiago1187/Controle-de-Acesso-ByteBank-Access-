@@ -9,4 +9,6 @@
 
 WIFI_SSID = "SEU_WIFI_2G"
 WIFI_SENHA = "SUA_SENHA"
+# IP do computador que roda a API, na mesma rede da placa (ver o README,
+# "Configurar o endereço da API"). Exemplo: "http://192.168.0.20:5000"
 URL_API = "http://IP_DO_COMPUTADOR:5000"
