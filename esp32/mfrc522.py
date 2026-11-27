@@ -62,9 +62,11 @@ class MFRC522:
 
 	def _wreg(self, reg, val):
 
+		# bytes([...]) e não b'%c': no MicroPython, b'%c' com valor acima de 0x7F
+		# vira dois bytes (UTF-8), e o leitor recebe lixo na FIFO. Era o que
+		# impedia a anticolisão (0x93) e deixava o UID sem ler na bancada.
 		self.cs.value(0)
-		self.spi.write(b'%c' % int(0xff & ((reg << 1) & 0x7e)))
-		self.spi.write(b'%c' % int(0xff & val))
+		self.spi.write(bytes([(reg << 1) & 0x7e, val & 0xff]))
 		self.cs.value(1)
 
 	def _rreg(self, reg):
