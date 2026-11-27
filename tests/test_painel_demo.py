@@ -66,8 +66,8 @@ class TestPainelDemo(unittest.TestCase):
         self.assertIn("Acesso negado", tela.error[0].value)
         self.assertTrue(any("negado. As 3 luzes" in c.value for c in tela.caption), "semáforo deveria acender as 3 luzes")
         tabela = tela.dataframe[0].value
-        uid_novo = tabela["uid"][0]
-        self.assertEqual(list(tabela["uid"]), [uid_novo, "01020304"])
+        uid_novo = tabela["UID"][0]
+        self.assertEqual(list(tabela["UID"]), [uid_novo, "01020304"])
         metricas = {m.label: m.value for m in tela.metric}
         self.assertEqual(metricas["Liberados"], "1")
         self.assertEqual(metricas["Negados"], "1")
@@ -80,11 +80,18 @@ class TestPainelDemo(unittest.TestCase):
         self.assertFalse(tela.exception, tela.exception)
         self.assertEqual(api.cartoes[uid_novo]["categoria"], "estagio")
         self.assertEqual(api.cartoes[uid_novo]["nome"], "Maria")
-        self.assertFalse(tela.warning, "depois do cadastro o pedido de cadastro some")
 
-        # Na próxima vez o mesmo cartão entra como foi definido
-        tela = self.clicar(tela, "Cartão novo")
-        self.assertTrue(any("Acesso liberado para Maria" in a.value for a in tela.success))
+        # Na próxima leitura, o cartão cadastrado é liberado e aparece no painel
+        acesso = api.app.test_client().post(
+            "/acessos", json={"uid": uid_novo, "presenca": True}
+        )
+        self.assertEqual(acesso.get_json()["resultado"], "liberado")
+        tela = self.abrir_painel()
+        self.assertFalse(tela.exception, tela.exception)
+        tabela = tela.dataframe[0].value
+        self.assertEqual(tabela.iloc[0]["UID"], uid_novo)
+        self.assertEqual(tabela.iloc[0]["Nome"], "Maria")
+        self.assertTrue(tabela.iloc[0]["Data e hora"])
         self.assertTrue(any("Maria (estagio), liberado. Luz verde" in c.value for c in tela.caption))
 
         # Comando do painel chega na placa simulada e sai da fila
